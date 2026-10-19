@@ -207,11 +207,17 @@ fn start_unix_ipc_listener(proxy: EventLoopProxy<UserEvent>) {
                 let _ = s.set_read_timeout(Some(Duration::from_millis(300)));
                 if s.read_to_end(&mut buf).is_ok() && !buf.is_empty() {
                     if let Ok(msg) = serde_json::from_slice::<IpcTriggerMessage>(&buf) {
+                        // A clicked folder opens over its own Dock tile, sized like the Dock
+                        let mut screen_pos = msg.screen_pos;
+                        let tile_rect = msg.folder_id.as_deref().and_then(folder_dock_tile);
+                        if let Some(r) = &tile_rect {
+                            screen_pos.mouse_x = r.x + r.width * 0.5;
+                        }
                         let _ = proxy.send_event(UserEvent::TriggerPopover {
                             folder_id: msg.folder_id,
-                            screen_pos: msg.screen_pos,
-                            anchor_top: None,
-                            tile: None,
+                            screen_pos,
+                            anchor_top: tile_rect.as_ref().map(|r| r.y),
+                            tile: tile_rect.as_ref().map(|r| r.width),
                             is_hover: false,
                         });
                     }
@@ -219,6 +225,18 @@ fn start_unix_ipc_listener(proxy: EventLoopProxy<UserEvent>) {
             }
         });
     }
+}
+
+/// The Dock tile pinned for a folder, found by its bundle path.
+fn folder_dock_tile(folder_id: &str) -> Option<macos::DockIconRect> {
+    let cfg = load_or_init_config();
+    let name = cfg.folders.iter().find(|f| f.id == folder_id)?.name.clone();
+    let stem = config::sanitize_bundle_name(&name);
+    macos::get_macos_dock_icon_rects().into_iter().find(|r| {
+        r.path.contains("/OpenFolders/")
+            && std::path::Path::new(&r.path).file_stem().map(|s| s.to_string_lossy() == stem.as_str())
+                == Some(true)
+    })
 }
 
 /// Watches for mouse hover over any Folder icon in the native macOS Dock.
@@ -917,7 +935,7 @@ fn main() {
         content_height: POPUP_HEIGHT_COMPACT,
         row: RowRect::default(),
         panel: None,
-        tile_size: 48.0,
+        tile_size: macos::dock_tile_size().map_or(48.0, |s| s + 2.0),
         popup_visible: show_on_launch,
         popup_rect: (0.0, 0.0, 0.0, 0.0),
         interacting: show_on_launch,
@@ -1064,7 +1082,9 @@ fn main() {
                 st.last_shown_at = Instant::now();
                 st.anchor_x = screen_pos.mouse_x;
                 st.anchor_top = anchor_top;
-                if let Some(t) = tile {
+                // Size the row from the Dock's setting (a hovered tile's frame grows with
+                // magnification); fall back to the tile frame. Tiles are 2 pt wider than icons.
+                if let Some(t) = macos::dock_tile_size().map(|s| s + 2.0).or(tile) {
                     st.tile_size = t;
                 }
                 let tile_size = st.tile_size;

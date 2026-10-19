@@ -115,6 +115,28 @@ extern "C" {
     fn CoreDockSetAutoHideEnabled(flag: u8);
 }
 
+/// The Dock's icon size in points, from its own settings. Unlike Accessibility frames this
+/// needs no permission and ignores magnification.
+pub fn dock_tile_size() -> Option<f64> {
+    unsafe {
+        let pool = NSAutoreleasePool::new(nil);
+        let defaults: id = msg_send![class!(NSUserDefaults), standardUserDefaults];
+        let domain: id = msg_send![defaults, persistentDomainForName: NSString::alloc(nil).init_str("com.apple.dock")];
+        let mut size = None;
+        if domain != nil {
+            let v: id = msg_send![domain, objectForKey: NSString::alloc(nil).init_str("tilesize")];
+            if v != nil {
+                let d: f64 = msg_send![v, doubleValue];
+                if d >= 16.0 {
+                    size = Some(d);
+                }
+            }
+        }
+        let _: () = msg_send![pool, drain];
+        size
+    }
+}
+
 pub fn dock_autohide_enabled() -> bool {
     unsafe { CoreDockGetAutoHideEnabled() != 0 }
 }

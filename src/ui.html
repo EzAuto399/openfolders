@@ -10,8 +10,11 @@
     --dock-bg: rgba(28, 30, 38, 0.82);
     --dock-border: rgba(255, 255, 255, 0.18);
     --text-main: #f8fafc;
-    /* Size of one native Dock icon; set from the hovered Dock tile so the popup matches the Dock */
+    /* Size of one native Dock icon; set from the hovered Dock tile so the popup matches the Dock.
+       Padding and radius follow the Dock's own proportions (measured on macOS 26: a 33 pt icon
+       sits in 43 pt of glass with an 11 pt corner). */
     --tile: 48px;
+    --row-pad: calc(var(--tile) * 0.15);
     /* Glyphs, dots and dividers on the glass follow the system appearance like the Dock does */
     --glyph: rgba(0, 0, 0, 0.62);
     --glyph-soft: rgba(0, 0, 0, 0.14);
@@ -97,11 +100,11 @@
   .dock-pill-row {
     /* The glass itself is the native Dock material drawn behind the webview (see main.rs) */
     background: transparent;
-    border-radius: calc(var(--tile) * 0.5);
+    border-radius: calc(var(--tile) / 3);
     display: flex;
     align-items: center;
-    padding: 5px 8px 7px;
-    gap: 4px;
+    padding: var(--row-pad) 2px;
+    gap: 0;
     overflow-x: auto;
     position: relative;
   }
@@ -121,8 +124,9 @@
 
   /* App icon in the row */
   .dock-icon-item {
-    width: var(--tile);
-    height: calc(var(--tile) + 2px);
+    /* Native tiles are 2 pt wider than their icon */
+    width: calc(var(--tile) + 2px);
+    height: var(--tile);
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -169,7 +173,7 @@
     height: 4.5px;
     border-radius: 50%;
     position: absolute;
-    bottom: -5px;
+    bottom: calc(var(--row-pad) * -0.3 - 2px);
     left: 50%;
     transform: translateX(-50%);
     background: transparent;
@@ -197,6 +201,8 @@
     font-size: calc(var(--tile) * 0.4);
     font-weight: 400;
     line-height: 1;
+    /* Fill one tile slot, like a Dock icon */
+    margin: 0 calc(var(--tile) * 0.14 + 1px);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -1524,7 +1530,8 @@ window.__dropHint = function(on) {
 };
 
 window.__openFolderFromDock = function(folderId, tile) {
-  if (tile > 0) document.documentElement.style.setProperty("--tile", `${Math.round(tile)}px`);
+  // `tile` is the Dock tile's width, which is 2 pt wider than the icon drawn in it
+  if (tile > 2) document.documentElement.style.setProperty("--tile", `${Math.round(tile - 2)}px`);
   if (folderId && state.config.folders.some(f => f.id === folderId)) {
     state.hoveredFolderId = folderId;
     state.config.active_folder_id = folderId;

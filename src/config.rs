@@ -300,8 +300,11 @@ pub fn build_folder_app_bundles(
     let mut created_bundles = Vec::new();
 
     // 1. Build the main composer bundle: ~/Applications/OpenFolders/OpenFolders.app
+    // Skipped while running from it: install.sh may have signed it, and rewriting it would
+    // break that signature and with it the Accessibility permission
     let main_bundle = out_dir.join("OpenFolders.app");
-    if let Some(first_folder) = cfg.folders.first() {
+    let running_from_main = current_exe.starts_with(&main_bundle);
+    if let Some(first_folder) = cfg.folders.first().filter(|_| !running_from_main) {
         let main_png = generate_folder_preview_png(first_folder, mem_cache);
         create_single_app_bundle(
             &main_bundle,
@@ -467,7 +470,7 @@ pub fn sync_macos_dock(
     });
 
     let py_script = r#"
-import sys, json, os, plistlib, urllib.parse, subprocess
+import sys, json, os, plistlib, urllib.parse, subprocess, copy
 
 data = json.loads(sys.argv[1])
 pinned_bundles = data["pinned_bundles"]
@@ -480,6 +483,7 @@ with open(plist_path, "rb") as f:
 
 apps = dock.get("persistent-apps", [])
 new_apps = []
+existing_folders = {}
 
 def get_app_path(entry):
     try:
@@ -493,6 +497,7 @@ for entry in apps:
     p = get_app_path(entry)
     # Remove old OpenFolders entries so we re-insert cleanly in order
     if "/Applications/OpenFolders/" in p:
+        existing_folders.setdefault(p, entry)
         continue
     if unpin_enabled and p in unpin_apps:
         continue
@@ -511,7 +516,16 @@ for app in data.get("repin_apps", []):
         },
     })
 
+fresh = False
 for bpath in pinned_bundles:
+    # Reuse a folder's existing tile with its label key removed: the Dock leaves such a
+    # tile unnamed, but fills in an empty label and names tiles it has never seen
+    old = copy.deepcopy(existing_folders.get(bpath.rstrip("/")))
+    if old is not None:
+        old.setdefault("tile-data", {}).pop("file-label", None)
+        new_apps.append(old)
+        continue
+    fresh = True
     label = os.path.splitext(os.path.basename(bpath))[0]
     url_str = "file://" + urllib.parse.quote(bpath) + "/"
     tile = {
@@ -519,7 +533,6 @@ for bpath in pinned_bundles:
         "tile-data": {
             # No label: the Dock then draws no name tag over the folder's pop-up row
             # (OpenFolders shows the folder name beside the row instead)
-            "file-label": "",
             "file-data": {
                 "_CFURLString": url_str,
                 "_CFURLStringType": 15
@@ -542,6 +555,25 @@ with open(plist_path, "wb") as f:
 
 subprocess.run(["killall", "cfprefsd"], stderr=subprocess.DEVNULL)
 subprocess.run(["killall", "Dock"], stderr=subprocess.DEVNULL)
+
+# New tiles get their name filled in by the Dock once it restarts; blank it again in place
+if fresh:
+    import time
+    time.sleep(3)
+    subprocess.run(["killall", "cfprefsd"], stderr=subprocess.DEVNULL)
+    with open(plist_path, "rb") as f:
+        dock = plistlib.load(f)
+    changed = False
+    for e in dock.get("persistent-apps", []):
+        td = e.get("tile-data", {})
+        if "/Applications/OpenFolders/" in get_app_path(e) and "file-label" in td:
+            del td["file-label"]
+            changed = True
+    if changed:
+        with open(plist_path, "wb") as f:
+            plistlib.dump(dock, f)
+        subprocess.run(["killall", "cfprefsd"], stderr=subprocess.DEVNULL)
+        subprocess.run(["killall", "Dock"], stderr=subprocess.DEVNULL)
 "#;
 
     let status = Command::new("/usr/bin/python3")

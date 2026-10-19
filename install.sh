@@ -30,6 +30,16 @@ pkill -x openfolders 2>/dev/null || true
 sleep 0.5
 ./target/release/openfolders --build-bundles >/dev/null
 
+# Sign with your own code-signing certificate if you have one, so macOS keeps the
+# Accessibility permission across updates. Without one the app stays ad-hoc signed.
+IDENTITY="${OPENFOLDERS_SIGN_IDENTITY:-$(security find-identity -v -p codesigning 2>/dev/null \
+  | awk -F'"' '/Apple Development|Developer ID Application/ { print $2; exit }')}"
+if [[ -n "$IDENTITY" ]]; then
+  find "$APP" -exec xattr -c {} +
+  codesign --force --sign "$IDENTITY" --identifier dev.openfolders.composer "$APP" 2>/dev/null \
+    || echo "     (Couldn't sign with your certificate; continuing unsigned.)"
+fi
+
 echo "3/3  Starting OpenFolders and adding it to login items…"
 mkdir -p "$(dirname "$AGENT")"
 cat > "$AGENT" <<PLIST
