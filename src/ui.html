@@ -889,22 +889,29 @@ function showToast(msg) {
   window.__tt = setTimeout(() => t.classList.remove("show"), 2000);
 }
 
+let tooltipFor = null;
+
 function showTooltip(el, label) {
   const tip = document.getElementById("dockTooltip");
   const rect = el.getBoundingClientRect();
   tip.textContent = label;
-  // Keep the whole label inside the window; the arrow still points at the icon
-  const anchor = rect.left + rect.width / 2;
-  const half = tip.offsetWidth / 2;
-  const center = Math.max(half + 4, Math.min(window.innerWidth - half - 4, anchor));
-  tip.style.left = `${center}px`;
-  tip.style.setProperty("--arrow-x", `${half + anchor - center}px`);
-  tip.style.top = `${Math.max(2, rect.top - 30)}px`;
+  tooltipFor = el;
+  // Positioned from the bottom centre like everything else, so resizing the window to fit a
+  // long label doesn't move it; syncLayout widens the window to show all of it
+  tip.style.left = `calc(50% + ${rect.left + rect.width / 2 - window.innerWidth / 2}px)`;
+  tip.style.top = "auto";
+  tip.style.bottom = `${window.innerHeight - rect.top + 8}px`;
+  tip.style.setProperty("--arrow-x", "50%");
   tip.classList.add("show");
+  syncLayout();
 }
 
 function hideTooltip() {
-  document.getElementById("dockTooltip").classList.remove("show");
+  tooltipFor = null;
+  const tip = document.getElementById("dockTooltip");
+  if (!tip.classList.contains("show")) return;
+  tip.classList.remove("show");
+  syncLayout();
 }
 
 async function apiGet(path) {
@@ -989,9 +996,10 @@ function renderSecondRow(folder) {
     <div class="dock-divider"></div>
     <div class="dock-plus-item" id="addAppRowBtn" data-label="Add Apps to ${escapeAttr(folder.name)}" role="button" tabindex="0" aria-label="Add apps">+</div>
     <div class="dock-plus-item" id="folderMenuBtn" data-label="${escapeAttr(folder.name)} options" role="button" tabindex="0" aria-label="Folder options">⋯</div>
-    ${state.hoverReady ? "" : `<button class="row-notice" id="hoverSetupBtn" data-label="OpenFolders needs Accessibility access to see which Dock icon you're hovering">Turn on hover</button>`}
+    ${state.hoverReady ? "" : `<button class="row-notice" id="hoverSetupBtn" data-label="Needs Accessibility access to open on hover">Turn on hover</button>`}
   `;
 
+  if (tooltipFor && bar.contains(tooltipFor)) hideTooltip();
   bar.innerHTML = html;
 
   const hoverSetup = document.getElementById("hoverSetupBtn");
@@ -1229,16 +1237,23 @@ let lastLayout = "";
 // tall enough for modals/menus. Rust keeps it centred above the hovered Dock icon.
 function syncLayout() {
   const anyOpen = document.querySelectorAll(".modal-card.open, .context-menu.open").length > 0;
-  // The label hangs off the left of the row; reserve the same on the right so the row
-  // stays centred on the Dock icon
-  const labelW = document.getElementById("folderLabel").offsetWidth + 8;
-  let w = document.getElementById("secondRowBar").scrollWidth + 2 * labelW;
-  document.querySelectorAll(".modal-card.open").forEach(m => { w = Math.max(w, m.offsetWidth); });
-  if (anyOpen) w = Math.max(w, MENU_MIN_WIDTH - 32);
-  w = Math.ceil(w + 32);
-  // Compact height: the row plus room for the hover tooltip above it
   const bar = document.getElementById("secondRowBar");
-  const h = Math.ceil(bar.offsetHeight + 34);
+  // Size the window to everything on show. The row stays centred over the Dock icon and
+  // everything is laid out from the bottom centre, so measure each part's reach from there.
+  const cx = window.innerWidth / 2;
+  let halfW = 0, fromBottom = 0;
+  const parts = [bar, document.getElementById("folderLabel"),
+    ...document.querySelectorAll(".modal-card.open, .context-menu.open, .dock-tooltip.show")];
+  parts.forEach(el => {
+    const r = el.getBoundingClientRect();
+    if (!r.width) return;
+    halfW = Math.max(halfW, cx - r.left, r.right - cx);
+    fromBottom = Math.max(fromBottom, window.innerHeight - r.top);
+  });
+  if (anyOpen) halfW = Math.max(halfW, MENU_MIN_WIDTH / 2);
+  const w = Math.ceil(2 * halfW + 24);
+  // At least the row plus room for an app's name above it
+  const h = Math.ceil(Math.max(fromBottom + 8, bar.offsetHeight + 34));
   // Row frame for the native glass behind it, relative to the window centre and bottom
   const r = bar.getBoundingClientRect();
   const row = {

@@ -36,7 +36,6 @@ use wry::{DragDropEvent, WebViewBuilder};
 const SOCKET_PATH: &str = "/tmp/openfolders_ipc.sock";
 const POPUP_DEFAULT_WIDTH: f64 = 520.0;
 const POPUP_HEIGHT_COMPACT: f64 = 128.0;
-const POPUP_HEIGHT_MODAL: f64 = 480.0;
 /// How long the cursor may sit outside both the Dock icon and the popup before it closes.
 const HOVER_HIDE_GRACE: Duration = Duration::from_millis(350);
 /// While a row is open, another folder icon must stay hovered this long before the row switches,
@@ -795,11 +794,8 @@ fn handle_http_request(
 /// Popup frame (x, y, width, height), centred on the hovered Dock icon and sitting just above it.
 fn compute_popup_frame(st: &SharedState) -> (f64, f64, f64, f64) {
     let pos = &st.current_screen_pos;
-    let h = if st.modal_expanded {
-        POPUP_HEIGHT_MODAL
-    } else {
-        st.content_height
-    };
+    // The page measures what it shows, panels included; stay clear of the menu bar
+    let h = st.content_height.min(pos.screen_height - 40.0);
     let w = st.content_width.min(pos.screen_width - 24.0);
     let min_x = pos.screen_x + 12.0;
     let max_x = (pos.screen_x + pos.screen_width - w - 12.0).max(min_x);
