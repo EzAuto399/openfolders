@@ -1,9 +1,9 @@
 // Opens every surface of the OpenFolders UI in a headless browser that resizes itself the way
 // the native window does, and checks nothing is clipped or spills out of its panel.
-// Usage: node layout.mjs <port of the running app's UI server>
+// Usage: node layout.mjs <port of the running app's UI server> <its token from ~/.config/openfolders/ui-token>
 import { chromium } from "playwright";
 
-const port = process.argv[2];
+const [port, token] = process.argv.slice(2);
 const browser = await chromium.launch();
 let failed = 0;
 
@@ -22,7 +22,7 @@ for (const scheme of ["dark", "light"]) {
     if (req.method() === "POST") return route.fulfill({ body: '{"ok":true}' });
     return route.continue();
   });
-  await page.goto(`http://127.0.0.1:${port}/`);
+  await page.goto(`http://127.0.0.1:${port}/?t=${token}`);
   await page.waitForTimeout(300);
   const folderId = await page.evaluate(() => state.config.folders[0]?.id);
 

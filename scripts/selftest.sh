@@ -33,6 +33,7 @@ if [[ "${1:-}" == "--ui" ]]; then
   if [[ ! -d tests/ui/node_modules ]]; then
     (cd tests/ui && npm install --silent && npx playwright install chromium-headless-shell >/dev/null)
   fi
-  node tests/ui/layout.mjs "$PORT" || status=1
+  TOKEN="$(cat "$HOME/.config/openfolders/ui-token" 2>/dev/null || true)"
+  node tests/ui/layout.mjs "$PORT" "$TOKEN" || status=1
 fi
 exit $status

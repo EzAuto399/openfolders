@@ -915,22 +915,25 @@ function hideTooltip() {
   syncLayout();
 }
 
+// Proves to OpenFolders that requests come from this page (see main.rs)
+const UI_TOKEN = new URLSearchParams(location.search).get("t") || "";
+
 async function apiGet(path) {
-  const r = await fetch(path);
+  const r = await fetch(path, { headers: { "X-OpenFolders-Token": UI_TOKEN } });
   return r.json();
 }
 
 async function apiPost(path, body) {
   const r = await fetch(path, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", "X-OpenFolders-Token": UI_TOKEN },
     body: JSON.stringify(body || {})
   });
   return r.json();
 }
 
 function iconUrl(appPath) {
-  return `/api/icon?path=${encodeURIComponent(appPath)}`;
+  return `/api/icon?path=${encodeURIComponent(appPath)}&t=${UI_TOKEN}`;
 }
 
 function getAppRunningState(appPath) {

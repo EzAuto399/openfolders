@@ -492,6 +492,12 @@ fn start_http_server(state: Arc<Mutex<SharedState>>, proxy: EventLoopProxy<UserE
                     }
                 }
 
+                // Only OpenFolders' own page knows the token. Without it any web page in a
+                // browser could find this port and launch or quit apps.
+                if full_path.starts_with("/api/") && !request_has_token(&header_str, full_path) {
+                    send_response(&mut stream, "403 Forbidden", "text/plain", b"Forbidden", "");
+                    return;
+                }
                 handle_http_request(
                     &mut stream,
                     method,
@@ -523,6 +529,39 @@ fn send_response(
     );
     let _ = stream.write_all(header.as_bytes());
     let _ = stream.write_all(body);
+}
+
+/// Secret shared with the UI page through its URL; also saved (owner-only) so the self-test
+/// can open the UI. A new one each launch.
+fn ui_token() -> &'static str {
+    static TOKEN: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    TOKEN.get_or_init(|| {
+        let mut bytes = [0u8; 16];
+        if let Ok(mut f) = fs::File::open("/dev/urandom") {
+            let _ = f.read_exact(&mut bytes);
+        }
+        let token: String = bytes.iter().map(|b| format!("{:02x}", b)).collect();
+        let path = config::config_dir().join("ui-token");
+        if fs::write(&path, &token).is_ok() {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o600));
+        }
+        token
+    })
+}
+
+/// The token arrives as an X-OpenFolders-Token header, or as `t=` in the query for images.
+fn request_has_token(headers: &str, full_path: &str) -> bool {
+    let token = ui_token();
+    let in_header = headers.lines().any(|l| {
+        l.split_once(':').is_some_and(|(k, v)| {
+            k.trim().eq_ignore_ascii_case("x-openfolders-token") && v.trim() == token
+        })
+    });
+    let in_query = full_path
+        .split_once('?')
+        .is_some_and(|(_, q)| q.split('&').any(|kv| kv == format!("t={}", token)));
+    in_header || in_query
 }
 
 fn handle_http_request(
@@ -1071,7 +1110,7 @@ fn main() {
         window.set_focus();
     }
 
-    let url = format!("http://127.0.0.1:{}/", port);
+    let url = format!("http://127.0.0.1:{}/?t={}", port, ui_token());
     // Native file drops: dragging .app bundles from Finder onto the row adds them to the folder.
     // Any file drop is swallowed so the webview never navigates to a dropped file; drags that
     // start inside the row (reordering) carry no paths and stay with the page.
