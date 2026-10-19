@@ -1,6 +1,6 @@
 [package]
 name = "openfolders"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description = "iPhone-style folders for the macOS Dock: hover a folder, get its apps in a row above it."
 license = "MIT"
