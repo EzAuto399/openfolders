@@ -94,8 +94,16 @@ OpenFolders was made in a day, and there's plenty left to improve: a left or rig
 | `src/config.rs` | Folders, app bundles, Dock syncing |
 | `src/icon_gen.rs` | The 2×2 folder icons |
 | `src/ui.html` | The row, the app picker and the menus |
+| `src/selftest.rs`, `tests/ui/` | The self-test |
 
-Build with `cargo build --release`; run `./target/release/openfolders --help` for the command-line options.
+To try a change, run `./install.sh`, then check it with:
+
+```bash
+scripts/selftest.sh        # install, permissions, Dock tiles, and that each row opens centred right above its folder
+scripts/selftest.sh --ui   # also opens every menu and panel in a headless browser and checks nothing is cut off
+```
+
+Rows flash open for a moment while it runs; your mouse isn't touched. `--ui` needs Node and installs a headless browser into `tests/ui` the first time. Run `./target/release/openfolders --help` for the other command-line options.
 
 ## License
 

@@ -1,6 +1,7 @@
 mod config;
 mod icon_gen;
 mod macos;
+mod selftest;
 
 use config::{
     build_folder_app_bundles, config_file_path, get_cached_app_icon, load_or_init_config,
@@ -639,8 +640,18 @@ fn handle_http_request(
                 row: RowRect,
                 #[serde(default)]
                 panel: Option<RowRect>,
+                #[serde(default)]
+                seq: u64,
             }
-            if let Ok(req) = serde_json::from_slice::<LayoutReq>(body) {
+            // Requests can overtake each other; only the newest layout counts
+            static LAST_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+            if let Ok(req) = serde_json::from_slice::<LayoutReq>(body)
+                .map_err(|_| ())
+                .and_then(|r| {
+                    let prev = LAST_SEQ.fetch_max(r.seq, std::sync::atomic::Ordering::SeqCst);
+                    if r.seq != 0 && r.seq <= prev { Err(()) } else { Ok(r) }
+                })
+            {
                 let _ = proxy.send_event(UserEvent::SetLayout {
                     expanded: req.open,
                     width: req.width,
@@ -871,6 +882,9 @@ fn resume_dock_autohide() {
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
+    if args.iter().any(|a| a == "--self-test") {
+        std::process::exit(selftest::run(SOCKET_PATH));
+    }
     if args.iter().any(|a| a == "--check-accessibility") {
         let trusted = ensure_accessibility(false);
         let rects = get_macos_dock_icon_rects().len();
@@ -915,6 +929,7 @@ fn main() {
              --sync-dock --collapse  pin folders and remove the apps inside them from the Dock\n\
              --build-bundles      rebuild the folder icons in ~/Applications/OpenFolders\n\
              --check-accessibility  say whether hover has the Accessibility access it needs\n\
+             --self-test          check the install, permissions, Dock and row placement\n\
              --remove-from-dock   remove the folders from the Dock and put their apps back\n\
              --restore-dock       restore the Dock exactly as it was before OpenFolders"
         );

@@ -716,3 +716,42 @@ pub fn get_macos_dock_icon_rects() -> Vec<DockIconRect> {
     out
 }
 
+
+#[link(name = "CoreGraphics", kind = "framework")]
+extern "C" {
+    fn CGWindowListCopyWindowInfo(option: u32, relative_to_window: u32) -> *const c_void;
+}
+
+/// On-screen windows of a process as (x, y, width, height), top-left origin.
+pub fn onscreen_window_frames(pid: i32) -> Vec<(f64, f64, f64, f64)> {
+    let mut out = Vec::new();
+    unsafe {
+        let pool = NSAutoreleasePool::new(nil);
+        // kCGWindowListOptionOnScreenOnly, kCGNullWindowID
+        let list = CGWindowListCopyWindowInfo(1, 0);
+        if !list.is_null() {
+            let arr = list as id;
+            let count: usize = msg_send![arr, count];
+            let key = |s: &str| NSString::alloc(nil).init_str(s);
+            for i in 0..count {
+                let info: id = msg_send![arr, objectAtIndex: i];
+                let owner: id = msg_send![info, objectForKey: key("kCGWindowOwnerPID")];
+                if owner == nil || { let p: i32 = msg_send![owner, intValue]; p } != pid {
+                    continue;
+                }
+                let b: id = msg_send![info, objectForKey: key("kCGWindowBounds")];
+                if b == nil {
+                    continue;
+                }
+                let num = |k: &str| -> f64 {
+                    let v: id = msg_send![b, objectForKey: key(k)];
+                    if v == nil { 0.0 } else { msg_send![v, doubleValue] }
+                };
+                out.push((num("X"), num("Y"), num("Width"), num("Height")));
+            }
+            CFRelease(list);
+        }
+        let _: () = msg_send![pool, drain];
+    }
+    out
+}

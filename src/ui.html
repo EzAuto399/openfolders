@@ -1235,7 +1235,22 @@ let lastLayout = "";
 
 // Tell the native window how big to be: wide enough for the app row (or open modal),
 // tall enough for modals/menus. Rust keeps it centred above the hovered Dock icon.
+// Several UI changes in a row (closing one panel, opening the next) send one resize, for the
+// final state. Each carries a number so the app can drop one that arrives late.
+let layoutQueued = false;
+// Starts from the clock so a reloaded page still counts up from where it left off
+let layoutSeq = Date.now();
+
 function syncLayout() {
+  if (layoutQueued) return;
+  layoutQueued = true;
+  requestAnimationFrame(() => {
+    layoutQueued = false;
+    sendLayout();
+  });
+}
+
+function sendLayout() {
   const anyOpen = document.querySelectorAll(".modal-card.open, .context-menu.open").length > 0;
   const bar = document.getElementById("secondRowBar");
   // Size the window to everything on show. The row stays centred over the Dock icon and
@@ -1279,7 +1294,7 @@ function syncLayout() {
     v && typeof v === "object" ? Object.values(v).map(Math.round) : v));
   if (key === lastLayout) return;
   lastLayout = key;
-  apiPost("/api/set-layout", { open: anyOpen, width: w, height: h, row, panel });
+  apiPost("/api/set-layout", { seq: ++layoutSeq, open: anyOpen, width: w, height: h, row, panel });
 }
 
 // Picker order is fixed while it is open (apps already in the folder first), so toggling

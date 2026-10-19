@@ -1,0 +1,9 @@
+{
+  "name": "openfolders-ui-tests",
+  "private": true,
+  "type": "module",
+  "description": "Checks that the row, menus and panels fit their window. Run through scripts/selftest.sh --ui.",
+  "dependencies": {
+    "playwright": "1.58.2"
+  }
+}
