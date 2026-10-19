@@ -12,13 +12,28 @@ if [[ "$(uname)" != "Darwin" ]]; then
   exit 1
 fi
 
-if ! command -v cargo >/dev/null 2>&1; then
-  echo "OpenFolders is built with Rust, which isn't installed yet. Install it with:"
-  echo
-  echo "  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh"
-  echo
-  echo "then open a new terminal and run ./install.sh again."
+# Building needs Apple's command line tools (the C linker)
+if ! xcode-select -p >/dev/null 2>&1; then
+  echo "OpenFolders needs Apple's command line tools to build. A macOS window will offer"
+  echo "to install them now; when that finishes, run ./install.sh again."
+  xcode-select --install 2>/dev/null || true
   exit 1
+fi
+
+# Rust may be installed but not on this shell's PATH yet
+if ! command -v cargo >/dev/null 2>&1 && [[ -f "$HOME/.cargo/env" ]]; then
+  source "$HOME/.cargo/env"
+fi
+
+if ! command -v cargo >/dev/null 2>&1; then
+  echo "OpenFolders is built from source with Rust, which isn't installed."
+  read -r -p "Install Rust now from rustup.rs? It takes about a minute. [Y/n] " answer || answer=Y
+  if [[ "${answer:-Y}" =~ ^[Nn] ]]; then
+    echo "Install it later with: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh"
+    exit 1
+  fi
+  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+  source "$HOME/.cargo/env"
 fi
 
 echo "1/3  Building (first build takes about a minute)…"
@@ -67,7 +82,8 @@ cat <<'DONE'
 OpenFolders is running.
 
   • macOS will ask to allow OpenFolders under Accessibility. Allow it: that's how
-    it knows which Dock icon you're hovering.
+    it knows which Dock icon you're hovering. Until then, clicking a folder still
+    opens it, and its row shows a "Turn on hover" button.
   • Your folders are now in the Dock. Hover one to open it.
   • Right-click the row for Add Apps, Edit Folder, New Folder and Dock Settings.
 

@@ -21,17 +21,19 @@ My iPhone solved this years ago with folders, so I brought that design to the Ma
 
 ## Install
 
-You need [Rust](https://rustup.rs). Built and tested on macOS 26 Tahoe; older versions should work but are untested.
+Paste this into Terminal:
 
 ```bash
-git clone https://github.com/EzAuto399/openfolders.git
-cd openfolders
-./install.sh
+git clone https://github.com/EzAuto399/openfolders.git && cd openfolders && ./install.sh
 ```
 
-The installer builds OpenFolders, puts it in `~/Applications/OpenFolders`, starts it and adds it to your login items. On first run it pins four starter folders to your Dock. They're filled with common apps you already have (developer tools, AI apps, chat apps, browsers), and you can change them all.
+OpenFolders builds from source in about a minute. If you don't have [Rust](https://rustup.rs) yet, the installer offers to install it; if macOS lacks its command line tools, it opens Apple's installer for them. Built and tested on macOS 26 Tahoe; older versions should work but are untested.
 
-When macOS asks, **allow OpenFolders under Accessibility**. It needs this to know which Dock icon you're hovering.
+The installer puts OpenFolders in `~/Applications/OpenFolders`, starts it and adds it to your login items. On first run it pins four starter folders to your Dock. They're filled with common apps you already have (developer tools, AI apps, chat apps, browsers), and you can change them all.
+
+Then **allow OpenFolders under Accessibility** when macOS asks. It needs this to know which Dock icon you're hovering. Until you do, clicking a folder still opens it, and the row shows a **Turn on hover** button that takes you to the right setting.
+
+To update later, run `git pull && ./install.sh` in the same folder.
 
 ## Use
 
@@ -69,7 +71,7 @@ To put the Dock back exactly as it was before you installed OpenFolders, run `~/
 ## Good to know
 
 - **Running apps still show in the Dock.** macOS always shows running apps there, even with Keep Dock clean on.
-- **After updating, Accessibility may need a nudge.** A rebuilt app counts as new to macOS: in System Settings → Privacy & Security → Accessibility, turn OpenFolders off and on again.
+- **Hover does nothing?** Check System Settings → Privacy & Security → Accessibility. Remove OpenFolders with **−**, then add `~/Applications/OpenFolders/OpenFolders.app` back with **+**. If you have an Apple developer certificate, the installer signs with it and this survives updates; otherwise each update is a new app to macOS and needs this again.
 - **Bottom Dock, main display.** A Dock on the left or right side, and multiple displays, aren't supported yet.
 - Changing which apps are pinned restarts the Dock for a moment. OpenFolders only does this after a row closes.
 
