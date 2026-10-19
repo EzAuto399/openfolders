@@ -1,0 +1,1541 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>OpenFolders</title>
+<style>
+  :root {
+    --accent: #6366f1;
+    --dock-bg: rgba(28, 30, 38, 0.82);
+    --dock-border: rgba(255, 255, 255, 0.18);
+    --text-main: #f8fafc;
+    /* Size of one native Dock icon; set from the hovered Dock tile so the popup matches the Dock */
+    --tile: 48px;
+    /* Glyphs, dots and dividers on the glass follow the system appearance like the Dock does */
+    --glyph: rgba(0, 0, 0, 0.62);
+    --glyph-soft: rgba(0, 0, 0, 0.14);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --glyph: rgba(255, 255, 255, 0.82);
+      --glyph-soft: rgba(255, 255, 255, 0.2);
+    }
+  }
+
+  * {
+    box-sizing: border-box;
+    user-select: none;
+    -webkit-user-select: none;
+    margin: 0;
+    padding: 0;
+  }
+
+  html, body {
+    width: 100%;
+    height: 100%;
+    background: transparent !important;
+    overflow: hidden;
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", sans-serif;
+    color: var(--text-main);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* App row anchored at the bottom center of the transparent window, right above the native Dock icon */
+  .dock-stack-root {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-end;
+    padding: 0 16px 0 16px;
+    gap: 8px;
+    position: relative;
+  }
+
+  /* ============================================================================
+     APP ROW: Pops up on HOVER over a folder icon in the native macOS Dock
+     Looks just like a native macOS Dock row floating above it
+     ============================================================================ */
+  .second-row-wrap {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    max-width: 100%;
+    opacity: 0;
+    transform: translateY(10px) scale(0.96);
+    pointer-events: none;
+    transition: opacity 0.16s cubic-bezier(0.22, 1, 0.36, 1),
+                transform 0.18s cubic-bezier(0.22, 1, 0.36, 1);
+    position: relative;
+  }
+
+  /* Folder name beside the row (left), styled like the Dock's own name label */
+  .folder-label {
+    position: absolute;
+    right: calc(100% + 8px);
+    top: 50%;
+    transform: translateY(-50%);
+    padding: 4px 11px;
+    border-radius: 999px;
+    background: rgba(72, 72, 76, 0.86);
+    color: #fff;
+    font-size: 13px;
+    font-weight: 500;
+    white-space: nowrap;
+    pointer-events: none;
+  }
+
+  .second-row-wrap.visible {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    pointer-events: auto;
+  }
+
+  .dock-pill-row {
+    /* The glass itself is the native Dock material drawn behind the webview (see main.rs) */
+    background: transparent;
+    border-radius: calc(var(--tile) * 0.5);
+    display: flex;
+    align-items: center;
+    padding: 5px 8px 7px;
+    gap: 4px;
+    overflow-x: auto;
+    position: relative;
+  }
+
+  .dock-pill-row::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* Vertical separator line just like macOS Dock */
+  .dock-divider {
+    width: 1px;
+    height: calc(var(--tile) * 0.8);
+    background: var(--glyph-soft);
+    margin: 0 4px;
+    flex-shrink: 0;
+  }
+
+  /* App icon in the row */
+  .dock-icon-item {
+    width: var(--tile);
+    height: calc(var(--tile) + 2px);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: transform 0.15s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  .dock-icon-item:hover {
+    transform: translateY(-3px) scale(1.08);
+  }
+
+  .dock-icon-item:active {
+    transform: translateY(-1px) scale(0.95);
+  }
+
+  .dock-icon-item.dragging {
+    opacity: 0.3;
+  }
+
+  /* Apps from Finder hovering the row: show it will accept them */
+  .dock-pill-row.drop-target {
+    box-shadow: inset 0 0 0 2px var(--glyph);
+  }
+
+  .dock-icon-item.drag-over {
+    background: var(--glyph-soft);
+    border-radius: calc(var(--tile) * 0.25);
+  }
+
+  .dock-icon-item img {
+    width: var(--tile);
+    height: var(--tile);
+    object-fit: contain;
+    filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.3));
+    pointer-events: none;
+  }
+
+  /* Running indicator dot at the bottom of the Dock icon */
+  .dock-dot {
+    width: 4.5px;
+    height: 4.5px;
+    border-radius: 50%;
+    position: absolute;
+    bottom: -5px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: transparent;
+  }
+
+  /* Same running dot as the native Dock */
+  .dock-dot.running {
+    width: 4px;
+    height: 4px;
+    background: var(--glyph);
+  }
+
+  .dock-dot.hidden-app {
+    opacity: 0.45;
+  }
+
+  /* Round '+' and '⋯' buttons at the end of the row */
+  .dock-plus-item {
+    width: calc(var(--tile) * 0.72);
+    height: calc(var(--tile) * 0.72);
+    border-radius: 50%;
+    border: none;
+    background: var(--glyph-soft);
+    color: var(--glyph);
+    font-size: calc(var(--tile) * 0.4);
+    font-weight: 400;
+    line-height: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: all 0.15s ease;
+  }
+
+  .dock-plus-item:hover {
+    transform: scale(1.08);
+  }
+
+  .dock-plus-item:focus-visible,
+  .dock-icon-item:focus-visible {
+    outline: 2px solid var(--glyph);
+    outline-offset: 2px;
+  }
+
+  /* App name tooltip above a hovered icon, styled like the Dock's */
+  .dock-tooltip {
+    position: fixed;
+    z-index: 9000;
+    background: rgba(34, 36, 44, 0.95);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    color: #f8fafc;
+    font-size: 12.5px;
+    font-weight: 520;
+    padding: 4px 12px;
+    border-radius: 999px;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+    pointer-events: none;
+    opacity: 0;
+    transform: translate(-50%, 4px);
+    transition: opacity 0.1s ease, transform 0.1s ease;
+    white-space: nowrap;
+  }
+
+  .dock-tooltip.show {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+
+  .dock-tooltip::after {
+    content: "";
+    position: absolute;
+    bottom: -5px;
+    left: var(--arrow-x, 50%);
+    transform: translateX(-50%) rotate(45deg);
+    width: 8px;
+    height: 8px;
+    background: rgba(34, 36, 44, 0.95);
+    border-right: 1px solid rgba(255, 255, 255, 0.18);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.18);
+  }
+
+  /* ============================================================================
+     PANELS (picker, folder editor, Dock settings, menus)
+     Native glass is drawn behind each panel by main.rs; CSS only lays out content.
+     Colors are macOS system colors so they read on light and dark glass.
+     ============================================================================ */
+  :root {
+    --label: rgba(0, 0, 0, 0.86);
+    --label-2: rgba(0, 0, 0, 0.55);
+    --fill: rgba(0, 0, 0, 0.07);
+    --fill-hover: rgba(0, 0, 0, 0.12);
+    --sep: rgba(0, 0, 0, 0.1);
+    --sys-accent: #007aff;
+    --sys-red: #ff3b30;
+    --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+    --spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --label: rgba(255, 255, 255, 0.92);
+      --label-2: rgba(255, 255, 255, 0.58);
+      --fill: rgba(255, 255, 255, 0.1);
+      --fill-hover: rgba(255, 255, 255, 0.16);
+      --sep: rgba(255, 255, 255, 0.12);
+      --sys-accent: #0a84ff;
+      --sys-red: #ff453a;
+    }
+  }
+
+  .modal-card {
+    flex-shrink: 0;
+    display: none;
+    flex-direction: column;
+    gap: 12px;
+    padding: 16px;
+    border-radius: 22px;
+    color: var(--label);
+    font-size: 13px;
+  }
+
+  .modal-card.open {
+    display: flex;
+  }
+
+  .modal-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .modal-title {
+    font-size: 15px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+  }
+
+  .modal-sub {
+    margin-top: 2px;
+    font-size: 12px;
+    color: var(--label-2);
+  }
+
+  .modal-footer {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 4px;
+  }
+
+  .modal-footer .spacer {
+    flex: 1;
+  }
+
+  /* macOS push buttons: one filled (accent) per panel, the rest neutral */
+  .btn {
+    height: 28px;
+    padding: 0 14px;
+    border-radius: 8px;
+    border: none;
+    background: var(--fill);
+    color: var(--label);
+    font: inherit;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background 0.12s, transform 0.12s var(--ease-out);
+  }
+
+  .btn:hover {
+    background: var(--fill-hover);
+  }
+
+  .btn:active {
+    transform: scale(0.97);
+  }
+
+  .btn.primary {
+    background: var(--sys-accent);
+    color: #fff;
+  }
+
+  .btn.primary:hover {
+    background: color-mix(in srgb, var(--sys-accent) 88%, #000);
+  }
+
+  .btn.danger-text {
+    background: transparent;
+    color: var(--sys-red);
+    padding: 0 4px;
+  }
+
+  .btn.danger-text.armed {
+    background: var(--sys-red);
+    color: #fff;
+    padding: 0 12px;
+  }
+
+  .btn:focus-visible,
+  .field:focus-visible,
+  .picker-tile:focus-visible,
+  .accent-dot:focus-visible {
+    outline: 3px solid color-mix(in srgb, var(--sys-accent) 55%, transparent);
+    outline-offset: 1px;
+  }
+
+  .field-label {
+    font-size: 12px;
+    color: var(--label-2);
+    margin-bottom: 5px;
+  }
+
+  .field {
+    width: 100%;
+    height: 30px;
+    padding: 0 10px;
+    border-radius: 8px;
+    border: none;
+    background: var(--fill);
+    color: var(--label);
+    font: inherit;
+    font-size: 13px;
+    outline: none;
+    user-select: text;
+    -webkit-user-select: text;
+  }
+
+  .field::placeholder {
+    color: var(--label-2);
+  }
+
+  .search-wrap {
+    position: relative;
+  }
+
+  .search-wrap .field {
+    padding-left: 30px;
+  }
+
+  .search-glyph {
+    position: absolute;
+    left: 10px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 13px;
+    height: 13px;
+    color: var(--label-2);
+    pointer-events: none;
+  }
+
+  /* ---------- App picker: Launchpad-style icon grid ---------- */
+  #appPickerModal {
+    width: 452px;
+    height: 372px;
+  }
+
+  .picker-scroll {
+    flex: 1;
+    overflow-y: auto;
+    margin: 0 -8px;
+    padding: 0 8px;
+  }
+
+  /* Fade the bottom edge so it's clear the grid scrolls */
+  .picker-scroll {
+    -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 28px), transparent);
+    mask-image: linear-gradient(to bottom, #000 calc(100% - 28px), transparent);
+  }
+
+  .picker-scroll::-webkit-scrollbar {
+    width: 0;
+  }
+
+  .picker-section {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--label-2);
+    margin: 4px 2px 6px;
+  }
+
+  .picker-grid {
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    gap: 2px;
+    margin-bottom: 10px;
+  }
+
+  .picker-tile {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    padding: 6px 2px 5px;
+    border-radius: 12px;
+    cursor: pointer;
+    position: relative;
+    transition: background 0.12s;
+  }
+
+  .picker-tile:hover {
+    background: var(--fill);
+  }
+
+  .picker-tile img {
+    width: 44px;
+    height: 44px;
+    object-fit: contain;
+    transition: transform 0.18s var(--spring);
+    pointer-events: none;
+  }
+
+  .picker-tile:active img {
+    transform: scale(0.9);
+  }
+
+  .picker-tile .name {
+    font-size: 11px;
+    line-height: 1.25;
+    text-align: center;
+    color: var(--label);
+    max-width: 100%;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    word-break: break-word;
+  }
+
+  /* Check badge on apps in the folder; a faint plus on hover for the rest */
+  .picker-tile .badge {
+    position: absolute;
+    top: 3px;
+    right: calc(50% - 30px);
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: 700;
+    color: #fff;
+    background: var(--sys-accent);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+    transform: scale(0);
+    transition: transform 0.22s var(--spring);
+  }
+
+  .picker-tile.selected .badge {
+    transform: scale(1);
+  }
+
+  .picker-tile:not(.selected):hover .badge {
+    transform: scale(1);
+    background: var(--fill-hover);
+    color: var(--label);
+    box-shadow: none;
+  }
+
+  .picker-empty {
+    padding: 40px 0;
+    text-align: center;
+    color: var(--label-2);
+  }
+
+  .modal-hint {
+    font-size: 11px;
+    color: var(--label-2);
+    text-align: center;
+  }
+
+  /* ---------- Folder editor ---------- */
+  #folderModal {
+    width: 320px;
+  }
+
+  .color-row {
+    display: flex;
+    gap: 10px;
+  }
+
+  .accent-dot {
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    cursor: pointer;
+    border: none;
+    box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.12);
+    transition: transform 0.15s var(--spring);
+  }
+
+  .accent-dot:hover {
+    transform: scale(1.1);
+  }
+
+  .accent-dot.active {
+    box-shadow: 0 0 0 2px var(--panel-ring, #fff), 0 0 0 4px var(--dot);
+  }
+
+  /* ---------- Dock settings ---------- */
+  #dockSyncModal {
+    width: 372px;
+  }
+
+  .setting-list {
+    display: flex;
+    flex-direction: column;
+    border-radius: 12px;
+    background: var(--fill);
+    overflow: hidden;
+  }
+
+  .setting-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 12px;
+  }
+
+  .setting-row + .setting-row {
+    border-top: 1px solid var(--sep);
+  }
+
+  .setting-text {
+    flex: 1;
+  }
+
+  .setting-title {
+    font-weight: 500;
+  }
+
+  .setting-desc {
+    margin-top: 1px;
+    font-size: 11.5px;
+    color: var(--label-2);
+  }
+
+  /* macOS switch */
+  .switch {
+    flex-shrink: 0;
+    width: 38px;
+    height: 22px;
+    border-radius: 999px;
+    border: none;
+    padding: 0;
+    background: var(--fill-hover);
+    position: relative;
+    cursor: pointer;
+    transition: background 0.18s var(--ease-out);
+  }
+
+  .switch::after {
+    content: "";
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: #fff;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+    transition: transform 0.22s var(--spring);
+  }
+
+  .switch[aria-checked="true"] {
+    background: var(--sys-accent);
+  }
+
+  .switch[aria-checked="true"]::after {
+    transform: translateX(16px);
+  }
+
+  .switch:disabled {
+    opacity: 0.6;
+  }
+
+  .switch:focus-visible {
+    outline: 3px solid color-mix(in srgb, var(--sys-accent) 55%, transparent);
+    outline-offset: 1px;
+  }
+
+  /* ---------- Menus (macOS menu metrics) ---------- */
+  .context-menu {
+    position: fixed;
+    z-index: 9999;
+    min-width: 200px;
+    transform: translateX(-50%);
+    padding: 5px;
+    border-radius: 12px;
+    color: var(--label);
+    display: none;
+  }
+
+  .context-menu.open {
+    display: block;
+  }
+
+  .ctx-header {
+    padding: 3px 9px 4px;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--label-2);
+  }
+
+  .ctx-item {
+    height: 24px;
+    padding: 0 9px;
+    font-size: 13px;
+    border-radius: 6px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+  }
+
+  .ctx-item .key {
+    color: var(--label-2);
+    font-size: 12px;
+  }
+
+  .ctx-item:hover {
+    background: var(--sys-accent);
+    color: #fff;
+  }
+
+  .ctx-item:hover .key {
+    color: rgba(255, 255, 255, 0.8);
+  }
+
+  .ctx-item.danger {
+    color: var(--sys-red);
+  }
+
+  .ctx-item.danger:hover {
+    background: var(--sys-red);
+    color: #fff;
+  }
+
+  .ctx-divider {
+    height: 1px;
+    background: var(--sep);
+    margin: 5px 9px;
+  }
+
+  .toast {
+    position: fixed;
+    top: 6px;
+    left: 50%;
+    transform: translate(-50%, -4px);
+    background: rgba(30, 30, 32, 0.92);
+    color: #fff;
+    padding: 5px 12px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 500;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.18s var(--ease-out), transform 0.18s var(--ease-out);
+    z-index: 99999;
+    white-space: nowrap;
+  }
+
+  .toast.show {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      transition-duration: 0s !important;
+    }
+  }
+</style>
+</head>
+<body>
+<div class="dock-stack-root" id="stackRoot">
+
+  <!-- Panels open above the row; each gets native glass behind it (see syncLayout) -->
+  <div class="modal-card" id="appPickerModal" role="dialog" aria-labelledby="pickerTitle">
+    <div class="modal-header">
+      <div>
+        <div class="modal-title" id="pickerTitle">Apps</div>
+        <div class="modal-sub" id="pickerSub"></div>
+      </div>
+      <button class="btn primary" id="closePickerBtn">Done</button>
+    </div>
+    <div class="search-wrap">
+      <svg class="search-glyph" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="7" cy="7" r="5"/><path d="M11 11l3.5 3.5"/></svg>
+      <input type="text" class="field" id="pickerSearch" placeholder="Search apps" aria-label="Search apps" autocomplete="off" spellcheck="false" />
+    </div>
+    <div class="picker-scroll" id="pickerGrid"></div>
+    <div class="modal-hint">Tip: drag apps from Finder onto the row to add them</div>
+  </div>
+
+  <div class="modal-card" id="folderModal" role="dialog" aria-labelledby="folderModalTitle">
+    <div class="modal-title" id="folderModalTitle">New folder</div>
+    <div>
+      <div class="field-label">Name</div>
+      <input type="text" class="field" id="folderNameInput" placeholder="e.g. Design, Messages, Work" autocomplete="off" spellcheck="false" />
+    </div>
+    <div>
+      <div class="field-label">Icon tint</div>
+      <div class="color-row" id="colorChoices"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn danger-text" id="deleteFolderBtn">Delete folder</button>
+      <div class="spacer"></div>
+      <button class="btn" id="closeFolderModalBtn">Cancel</button>
+      <button class="btn primary" id="saveFolderBtn">Save</button>
+    </div>
+  </div>
+
+  <div class="modal-card" id="dockSyncModal" role="dialog" aria-labelledby="dockSyncTitle">
+    <div class="modal-header">
+      <div>
+        <div class="modal-title" id="dockSyncTitle">Dock</div>
+        <div class="modal-sub">Your original Dock is backed up before any change.</div>
+      </div>
+      <button class="btn" id="closeDockSyncBtn">Done</button>
+    </div>
+    <div class="setting-list">
+      <label class="setting-row" for="keepCleanSwitch">
+        <div class="setting-text">
+          <div class="setting-title">Keep Dock clean</div>
+          <div class="setting-desc" id="keepCleanDesc">Apps in a folder leave the Dock. Take one out and it comes back.</div>
+        </div>
+        <button class="switch" id="keepCleanSwitch" role="switch" aria-checked="false" aria-label="Keep Dock clean"></button>
+      </label>
+      <div class="setting-row">
+        <div class="setting-text">
+          <div class="setting-title">Pin folders to Dock</div>
+          <div class="setting-desc">Add your folders and leave every other icon in place.</div>
+        </div>
+        <button class="btn" id="pinFoldersBtn">Pin</button>
+      </div>
+      <div class="setting-row">
+        <div class="setting-text">
+          <div class="setting-title">Restore original Dock</div>
+          <div class="setting-desc">Put the Dock back the way it was before OpenFolders.</div>
+        </div>
+        <button class="btn" id="restoreDockBtn">Restore</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==========================================================================
+       APP ROW: pops up above the hovered folder icon in the native macOS Dock
+       ========================================================================== -->
+  <div class="second-row-wrap visible" id="secondRowWrap">
+    <div class="folder-label" id="folderLabel"></div>
+    <div class="dock-pill-row" id="secondRowBar"></div>
+  </div>
+
+</div>
+
+<!-- App name tooltip, styled like the Dock's -->
+<div class="dock-tooltip" id="dockTooltip"></div>
+<!-- Right-click context menu -->
+<div class="context-menu" id="contextMenu"></div>
+<div class="toast" id="toast"></div>
+
+<script>
+const ACCENTS = ["#6366f1", "#a855f7", "#10b981", "#0ea5e9", "#f59e0b", "#ec4899"];
+
+let state = {
+  config: { folders: [], active_folder_id: "" },
+  running: {},
+  installedApps: [],
+  hoveredFolderId: null,
+  draggedAppIndex: null,
+  editingFolderId: null,
+  modalColor: "#6366f1"
+};
+
+function showToast(msg) {
+  const t = document.getElementById("toast");
+  t.textContent = msg;
+  t.classList.add("show");
+  clearTimeout(window.__tt);
+  window.__tt = setTimeout(() => t.classList.remove("show"), 2000);
+}
+
+function showTooltip(el, label) {
+  const tip = document.getElementById("dockTooltip");
+  const rect = el.getBoundingClientRect();
+  tip.textContent = label;
+  // Keep the whole label inside the window; the arrow still points at the icon
+  const anchor = rect.left + rect.width / 2;
+  const half = tip.offsetWidth / 2;
+  const center = Math.max(half + 4, Math.min(window.innerWidth - half - 4, anchor));
+  tip.style.left = `${center}px`;
+  tip.style.setProperty("--arrow-x", `${half + anchor - center}px`);
+  tip.style.top = `${Math.max(2, rect.top - 30)}px`;
+  tip.classList.add("show");
+}
+
+function hideTooltip() {
+  document.getElementById("dockTooltip").classList.remove("show");
+}
+
+async function apiGet(path) {
+  const r = await fetch(path);
+  return r.json();
+}
+
+async function apiPost(path, body) {
+  const r = await fetch(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body || {})
+  });
+  return r.json();
+}
+
+function iconUrl(appPath) {
+  return `/api/icon?path=${encodeURIComponent(appPath)}`;
+}
+
+function getAppRunningState(appPath) {
+  const clean = appPath.replace(/\/+$/, "");
+  return state.running[clean] || null;
+}
+
+function getHoveredOrActiveFolder() {
+  if (!state.config.folders.length) return null;
+  const targetId = state.hoveredFolderId || state.config.active_folder_id;
+  return state.config.folders.find(f => f.id === targetId) || state.config.folders[0];
+}
+
+function render2x2MiniHtml(folder) {
+  let html = "";
+  for (let i = 0; i < 4; i++) {
+    const app = folder.apps[i];
+    if (app) {
+      html += `<img src="${iconUrl(app.path)}" alt="" />`;
+    } else {
+      html += `<div class="empty-slot"></div>`;
+    }
+  }
+  return html;
+}
+
+function renderAll() {
+  const activeFolder = getHoveredOrActiveFolder();
+  if (!activeFolder) return;
+
+  document.documentElement.style.setProperty("--accent", activeFolder.accent || "#6366f1");
+
+  renderSecondRow(activeFolder);
+  syncLayout();
+}
+
+function renderSecondRow(folder) {
+  document.getElementById("folderLabel").textContent = folder.name;
+  const bar = document.getElementById("secondRowBar");
+  let html = "";
+
+  folder.apps.forEach((app, idx) => {
+    const run = getAppRunningState(app.path);
+    let dotClass = "dock-dot";
+    if (run) {
+      if (run.is_active) dotClass += " running active-app";
+      else if (run.is_hidden) dotClass += " running hidden-app";
+      else dotClass += " running";
+    }
+
+    html += `
+      <div class="dock-icon-item" tabindex="0" role="button" aria-label="${escapeAttr(app.name)}"
+           draggable="true"
+           data-idx="${idx}"
+           data-path="${escapeAttr(app.path)}"
+           data-name="${escapeAttr(app.name)}">
+        <img src="${iconUrl(app.path)}" alt="${escapeAttr(app.name)}" />
+        <div class="${dotClass}"></div>
+      </div>
+    `;
+  });
+
+  html += `
+    <div class="dock-divider"></div>
+    <div class="dock-plus-item" id="addAppRowBtn" data-label="Add Apps to ${escapeAttr(folder.name)}" role="button" tabindex="0" aria-label="Add apps">+</div>
+    <div class="dock-plus-item" id="folderMenuBtn" data-label="${escapeAttr(folder.name)} options" role="button" tabindex="0" aria-label="Folder options">⋯</div>
+  `;
+
+  bar.innerHTML = html;
+
+  bar.onkeydown = (e) => {
+    if ((e.key === "Enter" || e.key === " ") && e.target.getAttribute("role") === "button") {
+      e.preventDefault();
+      e.target.click();
+    }
+  };
+  bar.oncontextmenu = (e) => {
+    e.preventDefault();
+    openFolderMenu(e.clientX, bar.getBoundingClientRect().top, folder);
+  };
+
+  // Hover shows the name, click opens, right-click for Hide/Quit/Move, drag to reorder or take out
+  bar.querySelectorAll(".dock-icon-item").forEach(item => {
+    const idx = parseInt(item.dataset.idx, 10);
+    const appPath = item.dataset.path;
+    const appName = item.dataset.name;
+
+    item.onmouseenter = () => {
+      const run = getAppRunningState(appPath);
+      const suffix = run ? (run.is_hidden ? " (Hidden)" : " · Running") : "";
+      showTooltip(item, appName + suffix);
+    };
+    item.onmouseleave = () => hideTooltip();
+
+    item.onclick = async () => {
+      hideTooltip();
+      await apiPost("/api/app-action", { path: appPath, action: "launch", hide_window: true });
+    };
+
+    item.oncontextmenu = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      hideTooltip();
+      // Anchor above the icon, never over the row
+      openAppContextMenu(e.clientX, item.getBoundingClientRect().top, folder, idx, appName, appPath);
+    };
+
+    // Drag within the row to reorder; drag out of the row to take the app out of the folder
+    // (dropped on the Dock, it gets pinned there). The row is only re-rendered on dragend:
+    // removing the dragged element mid-drag would swallow the dragend event.
+    item.ondragstart = (e) => {
+      hideTooltip();
+      state.draggedAppIndex = idx;
+      state.pendingReorder = null;
+      e.dataTransfer.effectAllowed = "move";
+      e.dataTransfer.setData("text/plain", appName);
+      item.classList.add("dragging");
+      apiPost("/api/drag", { active: true });
+    };
+    item.ondragover = (e) => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "move";
+      item.classList.add("drag-over");
+    };
+    item.ondragleave = () => item.classList.remove("drag-over");
+    item.ondrop = (e) => {
+      e.preventDefault();
+      item.classList.remove("drag-over");
+      if (state.draggedAppIndex !== null && state.draggedAppIndex !== idx) {
+        state.pendingReorder = { from: state.draggedAppIndex, to: idx };
+      }
+    };
+    item.ondragend = async (e) => {
+      item.classList.remove("dragging");
+      const handled = e.dataTransfer.dropEffect !== "none";
+      const reorder = state.pendingReorder;
+      state.draggedAppIndex = null;
+      state.pendingReorder = null;
+      const res = await apiPost("/api/drag", { active: false, folder_id: folder.id, path: appPath, handled });
+      if (reorder) {
+        const [moved] = folder.apps.splice(reorder.from, 1);
+        folder.apps.splice(reorder.to, 0, moved);
+        renderAll();
+        await saveConfig();
+      } else if (res && res.removed) {
+        showToast(res.pinned ? `${appName} moved to the Dock` : `Removed ${appName} from ${folder.name}`);
+        refreshState();
+      }
+    };
+  });
+
+  const plusBtn = document.getElementById("addAppRowBtn");
+  plusBtn.onmouseenter = () => showTooltip(plusBtn, plusBtn.dataset.label);
+  plusBtn.onmouseleave = () => hideTooltip();
+  plusBtn.onclick = () => {
+    hideTooltip();
+    openAppPicker(folder);
+  };
+
+  const menuBtn = document.getElementById("folderMenuBtn");
+  menuBtn.onmouseenter = () => showTooltip(menuBtn, menuBtn.dataset.label);
+  menuBtn.onmouseleave = () => hideTooltip();
+  menuBtn.onclick = (e) => {
+    e.stopPropagation();
+    hideTooltip();
+    const r = menuBtn.getBoundingClientRect();
+    openFolderMenu(r.left + r.width / 2, r.top, folder);
+  };
+}
+
+// The window grows upward and stays centred on the Dock icon when a menu opens,
+// so anchor menus to the bottom edge and the horizontal centre.
+function placeMenu(menu, x, y) {
+  const finalWidth = Math.max(window.innerWidth, MENU_MIN_WIDTH);
+  const half = finalWidth / 2 - 100;
+  const dx = Math.max(-half, Math.min(half, x - window.innerWidth / 2));
+  menu.style.left = `calc(50% + ${dx}px)`;
+  menu.style.top = "auto";
+  menu.style.bottom = `${window.innerHeight - y + 6}px`;
+}
+
+function openFolderMenu(x, y, folder) {
+  const menu = document.getElementById("contextMenu");
+  let html = `<div class="ctx-header">${escapeHtml(folder.name)}</div>`;
+  html += `<div class="ctx-item" data-act="add"><span>Add Apps…</span></div>`;
+  html += `<div class="ctx-item" data-act="edit"><span>Edit Folder…</span></div>`;
+  html += `<div class="ctx-item" data-act="new"><span>New Folder…</span></div>`;
+  html += `<div class="ctx-divider"></div>`;
+  html += `<div class="ctx-item" data-act="sync"><span>Dock Settings…</span></div>`;
+  menu.innerHTML = html;
+  menu.classList.add("open");
+  placeMenu(menu, x, y);
+  syncLayout();
+
+  menu.querySelectorAll(".ctx-item").forEach(el => {
+    el.onclick = (e) => {
+      e.stopPropagation();
+      closeContextMenu();
+      const act = el.dataset.act;
+      if (act === "add") openAppPicker(folder);
+      else if (act === "edit") openFolderModal(folder);
+      else if (act === "new") openFolderModal(null);
+      else if (act === "sync") openDockSyncModal();
+    };
+  });
+}
+
+function openAppContextMenu(x, y, folder, idx, appName, appPath) {
+  const menu = document.getElementById("contextMenu");
+  const run = getAppRunningState(appPath);
+  const others = state.config.folders.filter(f => f.id !== folder.id);
+
+  let html = `<div class="ctx-header">${escapeHtml(appName)}</div>`;
+  html += `<div class="ctx-item" data-act="launch"><span>${run ? "Show" : "Open"}</span></div>`;
+  if (run) {
+    if (run.is_hidden) {
+      html += `<div class="ctx-item" data-act="unhide"><span>Unhide</span></div>`;
+    } else {
+      html += `<div class="ctx-item" data-act="hide"><span>Hide</span><span class="key">⌘H</span></div>`;
+    }
+    html += `<div class="ctx-item" data-act="quit"><span>Quit</span><span class="key">⌘Q</span></div>`;
+    html += `<div class="ctx-item danger" data-act="force_quit"><span>Force Quit</span></div>`;
+  }
+  if (others.length) {
+    html += `<div class="ctx-divider"></div>`;
+    for (const ofolder of others) {
+      html += `<div class="ctx-item" data-move="${ofolder.id}"><span>Move to ${escapeHtml(ofolder.name)}</span></div>`;
+    }
+  }
+  html += `<div class="ctx-divider"></div>`;
+  html += `<div class="ctx-item" data-act="reveal"><span>Show in Finder</span></div>`;
+  html += `<div class="ctx-item danger" data-act="remove"><span>Remove from Folder</span></div>`;
+
+  menu.innerHTML = html;
+  menu.classList.add("open");
+
+  placeMenu(menu, x, y);
+  syncLayout();
+
+  menu.querySelectorAll(".ctx-item").forEach(el => {
+    el.onclick = async (e) => {
+      e.stopPropagation();
+      closeContextMenu();
+      const act = el.dataset.act;
+      const moveId = el.dataset.move;
+      if (moveId) {
+        const dst = state.config.folders.find(x => x.id === moveId);
+        if (dst) {
+          const [moved] = folder.apps.splice(idx, 1);
+          if (!dst.apps.some(a => a.path === moved.path)) dst.apps.push(moved);
+          showToast(`Moved ${appName} to ${dst.name}`);
+          renderAll();
+          await saveConfig();
+        }
+        return;
+      }
+      if (act === "remove") {
+        folder.apps.splice(idx, 1);
+        renderAll();
+        await saveConfig();
+        showToast(`Removed ${appName}`);
+      } else if (act) {
+        const hideWin = act === "launch" || act === "reveal";
+        await apiPost("/api/app-action", { path: appPath, action: act, hide_window: hideWin });
+        if (!hideWin) {
+          setTimeout(refreshState, 250);
+          setTimeout(refreshState, 700);
+        }
+      }
+    };
+  });
+}
+
+function closeContextMenu() {
+  const menu = document.getElementById("contextMenu");
+  if (menu.classList.contains("open")) {
+    menu.classList.remove("open");
+    syncLayout();
+  }
+}
+
+function closeAllModals() {
+  document.querySelectorAll(".modal-card.open").forEach(m => m.classList.remove("open"));
+  closeContextMenu();
+  syncLayout();
+}
+
+const MENU_MIN_WIDTH = 300;
+let lastLayout = "";
+
+// Tell the native window how big to be: wide enough for the app row (or open modal),
+// tall enough for modals/menus. Rust keeps it centred above the hovered Dock icon.
+function syncLayout() {
+  const anyOpen = document.querySelectorAll(".modal-card.open, .context-menu.open").length > 0;
+  // The label hangs off the left of the row; reserve the same on the right so the row
+  // stays centred on the Dock icon
+  const labelW = document.getElementById("folderLabel").offsetWidth + 8;
+  let w = document.getElementById("secondRowBar").scrollWidth + 2 * labelW;
+  document.querySelectorAll(".modal-card.open").forEach(m => { w = Math.max(w, m.offsetWidth); });
+  if (anyOpen) w = Math.max(w, MENU_MIN_WIDTH - 32);
+  w = Math.ceil(w + 32);
+  // Compact height: the row plus room for the hover tooltip above it
+  const bar = document.getElementById("secondRowBar");
+  const h = Math.ceil(bar.offsetHeight + 34);
+  // Row frame for the native glass behind it, relative to the window centre and bottom
+  const r = bar.getBoundingClientRect();
+  const row = {
+    dx: r.left - window.innerWidth / 2,
+    bottom: window.innerHeight - r.bottom,
+    w: r.width,
+    h: r.height,
+    radius: parseFloat(getComputedStyle(bar).borderTopLeftRadius) || 0
+  };
+  const panelEl = document.querySelector(".modal-card.open, .context-menu.open");
+  let panel = null;
+  if (panelEl) {
+    const pr = panelEl.getBoundingClientRect();
+    panel = {
+      dx: pr.left - window.innerWidth / 2,
+      bottom: window.innerHeight - pr.bottom,
+      w: pr.width,
+      h: pr.height,
+      radius: parseFloat(getComputedStyle(panelEl).borderTopLeftRadius) || 0
+    };
+  }
+  const key = JSON.stringify([anyOpen, w, h, row, panel].map(v =>
+    v && typeof v === "object" ? Object.values(v).map(Math.round) : v));
+  if (key === lastLayout) return;
+  lastLayout = key;
+  apiPost("/api/set-layout", { open: anyOpen, width: w, height: h, row, panel });
+}
+
+// Picker order is fixed while it is open (apps already in the folder first), so toggling
+// an app never makes tiles jump between sections under the cursor.
+let pickerOrder = [];
+
+async function openAppPicker(folder) {
+  closeAllModals();
+  if (!state.installedApps.length) {
+    const res = await apiGet("/api/installed-apps");
+    state.installedApps = res.apps || [];
+  }
+  state.pickerFolderId = folder.id;
+  const inFolder = new Set(folder.apps.map(a => a.path));
+  state.__pickerInitialPaths = inFolder;
+  pickerOrder = [
+    ...state.installedApps.filter(a => inFolder.has(a.path)),
+    ...state.installedApps.filter(a => !inFolder.has(a.path))
+  ];
+  document.getElementById("pickerTitle").textContent = folder.name;
+  document.getElementById("pickerSearch").value = "";
+  document.getElementById("appPickerModal").classList.add("open");
+  renderPickerGrid("");
+  syncLayout();
+  document.getElementById("pickerSearch").focus();
+}
+
+function pickerFolder() {
+  return state.config.folders.find(f => f.id === state.pickerFolderId) || getHoveredOrActiveFolder();
+}
+
+function updatePickerSub() {
+  const folder = pickerFolder();
+  const n = folder ? folder.apps.length : 0;
+  document.getElementById("pickerSub").textContent = `${n} app${n === 1 ? "" : "s"} in this folder`;
+}
+
+function pickerTileHtml(app, selected) {
+  return `
+    <div class="picker-tile ${selected ? "selected" : ""}" role="checkbox" tabindex="0"
+         aria-checked="${selected}" data-path="${escapeAttr(app.path)}" data-name="${escapeAttr(app.name)}">
+      <img src="${iconUrl(app.path)}" loading="lazy" alt="" />
+      <span class="badge">${selected ? "✓" : "+"}</span>
+      <span class="name">${escapeHtml(app.name)}</span>
+    </div>`;
+}
+
+function renderPickerGrid(query) {
+  const folder = pickerFolder();
+  if (!folder) return;
+  const q = query.trim().toLowerCase();
+  const wrap = document.getElementById("pickerGrid");
+  const inFolder = new Set(folder.apps.map(a => a.path));
+  const list = pickerOrder.filter(a => !q || a.name.toLowerCase().includes(q));
+  // Sections come from the snapshot taken on open, not live membership
+  const initial = state.__pickerInitialPaths || inFolder;
+  const mine = list.filter(a => initial.has(a.path));
+  const rest = list.filter(a => !initial.has(a.path));
+
+  if (!list.length) {
+    wrap.innerHTML = `<div class="picker-empty">No apps named “${escapeHtml(query.trim())}”</div>`;
+  } else {
+    let html = "";
+    if (mine.length) {
+      html += `<div class="picker-section">In ${escapeHtml(folder.name)}</div>`;
+      html += `<div class="picker-grid">${mine.map(a => pickerTileHtml(a, inFolder.has(a.path))).join("")}</div>`;
+    }
+    if (rest.length) {
+      html += `<div class="picker-section">${mine.length ? "Other apps" : "All apps"}</div>`;
+      html += `<div class="picker-grid">${rest.map(a => pickerTileHtml(a, inFolder.has(a.path))).join("")}</div>`;
+    }
+    wrap.innerHTML = html;
+  }
+  updatePickerSub();
+
+  wrap.querySelectorAll(".picker-tile").forEach(el => {
+    el.onclick = () => togglePickerTile(el);
+  });
+}
+
+// Toggle in place: flip the badge, update the row underneath live, save.
+async function togglePickerTile(el) {
+  const folder = pickerFolder();
+  if (!folder) return;
+  const path = el.dataset.path;
+  const name = el.dataset.name;
+  const idx = folder.apps.findIndex(x => x.path === path);
+  const selected = idx < 0;
+  if (selected) folder.apps.push({ name, path });
+  else folder.apps.splice(idx, 1);
+  el.classList.toggle("selected", selected);
+  el.setAttribute("aria-checked", String(selected));
+  el.querySelector(".badge").textContent = selected ? "✓" : "+";
+  updatePickerSub();
+  renderAll();
+  await saveConfig();
+}
+
+function closePicker() {
+  state.__pickerInitialPaths = null;
+  closeAllModals();
+}
+
+function openFolderModal(folderOrNull) {
+  closeAllModals();
+  state.editingFolderId = folderOrNull ? folderOrNull.id : null;
+  state.modalColor = folderOrNull ? folderOrNull.accent : ACCENTS[state.config.folders.length % ACCENTS.length];
+  document.getElementById("folderModalTitle").textContent = folderOrNull ? "Edit folder" : "New folder";
+  document.getElementById("folderNameInput").value = folderOrNull ? folderOrNull.name : "";
+  const del = document.getElementById("deleteFolderBtn");
+  del.style.visibility = (folderOrNull && state.config.folders.length > 1) ? "visible" : "hidden";
+  disarmDelete();
+  renderModalColors();
+  document.getElementById("folderModal").classList.add("open");
+  syncLayout();
+  document.getElementById("folderNameInput").focus();
+}
+
+function renderModalColors() {
+  const wrap = document.getElementById("colorChoices");
+  wrap.innerHTML = ACCENTS.map(c => `
+    <button class="accent-dot ${c === state.modalColor ? 'active' : ''}" style="background:${c};--dot:${c}"
+            data-c="${c}" aria-label="Tint ${c}" aria-pressed="${c === state.modalColor}"></button>
+  `).join("");
+  wrap.querySelectorAll(".accent-dot").forEach(d => {
+    d.onclick = () => {
+      state.modalColor = d.dataset.c;
+      renderModalColors();
+    };
+  });
+}
+
+function openDockSyncModal() {
+  closeAllModals();
+  document.getElementById("keepCleanSwitch").setAttribute("aria-checked", String(!!state.config.keep_dock_clean));
+  document.getElementById("dockSyncModal").classList.add("open");
+  syncLayout();
+}
+
+async function saveConfig() {
+  await apiPost("/api/save-config", state.config);
+}
+
+async function refreshState() {
+  // Never re-render under an in-progress drag
+  if (state.draggedAppIndex !== null) return;
+  try {
+    const data = await apiGet("/api/state");
+    if (data && data.config) {
+      state.config = data.config;
+      state.running = data.running || {};
+      if (!state.hoveredFolderId) {
+        state.hoveredFolderId = state.config.active_folder_id;
+      }
+      renderAll();
+    }
+  } catch (_) {}
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, m => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[m]));
+}
+function escapeAttr(s) {
+  return escapeHtml(s);
+}
+
+document.addEventListener("click", () => closeContextMenu());
+document.getElementById("closePickerBtn").onclick = () => closePicker();
+document.getElementById("pickerSearch").oninput = (e) => renderPickerGrid(e.target.value);
+
+// Keyboard: Enter in search toggles the top match; arrows move through the grid
+// (6 columns); Space/Enter toggles the focused app; Esc closes whatever is open.
+document.getElementById("pickerSearch").onkeydown = (e) => {
+  const first = document.querySelector("#pickerGrid .picker-tile");
+  if (e.key === "Enter" && first) {
+    e.preventDefault();
+    togglePickerTile(first);
+  } else if (e.key === "ArrowDown" && first) {
+    e.preventDefault();
+    first.focus();
+  }
+};
+document.getElementById("pickerGrid").onkeydown = (e) => {
+  const tiles = [...document.querySelectorAll("#pickerGrid .picker-tile")];
+  const i = tiles.indexOf(document.activeElement);
+  if (i < 0) return;
+  const step = { ArrowRight: 1, ArrowLeft: -1, ArrowDown: 6, ArrowUp: -6 }[e.key];
+  if (step) {
+    e.preventDefault();
+    const next = i + step;
+    if (next < 0) document.getElementById("pickerSearch").focus();
+    else tiles[Math.min(next, tiles.length - 1)].focus();
+  } else if (e.key === " " || e.key === "Enter") {
+    e.preventDefault();
+    togglePickerTile(tiles[i]);
+  }
+};
+document.getElementById("folderNameInput").onkeydown = (e) => {
+  if (e.key === "Enter") document.getElementById("saveFolderBtn").click();
+};
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape") return;
+  if (document.getElementById("contextMenu").classList.contains("open")) closeContextMenu();
+  else if (document.querySelector(".modal-card.open")) closePicker();
+  else apiPost("/api/hide-window", {});
+});
+document.getElementById("closeFolderModalBtn").onclick = () => closeAllModals();
+document.getElementById("closeDockSyncBtn").onclick = () => closeAllModals();
+
+document.getElementById("saveFolderBtn").onclick = async () => {
+  const name = document.getElementById("folderNameInput").value.trim();
+  if (!name) return;
+  let createdFolder = null;
+  if (state.editingFolderId) {
+    const f = state.config.folders.find(x => x.id === state.editingFolderId);
+    if (f) {
+      f.name = name;
+      f.accent = state.modalColor;
+    }
+  } else {
+    const id = "folder-" + Date.now();
+    createdFolder = { id, name, accent: state.modalColor, apps: [], pinned_to_dock: true };
+    state.config.folders.push(createdFolder);
+    state.config.active_folder_id = id;
+    state.hoveredFolderId = id;
+  }
+  closeAllModals();
+  renderAll();
+  await saveConfig();
+  if (createdFolder) openAppPicker(createdFolder);
+};
+
+function disarmDelete() {
+  const del = document.getElementById("deleteFolderBtn");
+  del.classList.remove("armed");
+  del.textContent = "Delete folder";
+}
+
+// Deleting a folder can't be undone: the first click arms the button, the second deletes.
+document.getElementById("deleteFolderBtn").onclick = async () => {
+  if (!state.editingFolderId || state.config.folders.length <= 1) return;
+  const del = document.getElementById("deleteFolderBtn");
+  if (!del.classList.contains("armed")) {
+    del.classList.add("armed");
+    del.textContent = "Confirm Delete";
+    clearTimeout(window.__delT);
+    window.__delT = setTimeout(disarmDelete, 4000);
+    syncLayout();
+    return;
+  }
+  state.config.folders = state.config.folders.filter(x => x.id !== state.editingFolderId);
+  state.config.active_folder_id = state.config.folders[0].id;
+  state.hoveredFolderId = state.config.folders[0].id;
+  closeAllModals();
+  renderAll();
+  await saveConfig();
+};
+
+// Each Dock action shows progress on its own button, then reports the result
+async function runDockAction(btn, busyLabel, path, body, okMsg) {
+  const label = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = busyLabel;
+  const res = await apiPost(path, body);
+  btn.disabled = false;
+  btn.textContent = label;
+  closeAllModals();
+  showToast(res.ok ? okMsg : (res.message || "Couldn’t update the Dock"));
+}
+
+// Turning it on syncs right away; after that every folder edit follows when the row closes
+document.getElementById("keepCleanSwitch").onclick = async (e) => {
+  e.preventDefault();
+  const sw = e.currentTarget;
+  const on = sw.getAttribute("aria-checked") !== "true";
+  const desc = document.getElementById("keepCleanDesc");
+  const descText = desc.textContent;
+  sw.setAttribute("aria-checked", String(on));
+  state.config.keep_dock_clean = on;
+  await saveConfig();
+  if (!on) {
+    showToast("Dock won’t change automatically");
+    return;
+  }
+  sw.disabled = true;
+  desc.textContent = "Cleaning up your Dock…";
+  const res = await apiPost("/api/dock-sync", { unpin_grouped_apps: true });
+  sw.disabled = false;
+  desc.textContent = descText;
+  showToast(res.ok ? "Dock cleaned up" : (res.message || "Couldn’t update the Dock"));
+};
+document.getElementById("pinFoldersBtn").onclick = (e) =>
+  runDockAction(e.currentTarget, "Pinning…", "/api/dock-sync", { unpin_grouped_apps: false }, "Folders pinned to the Dock");
+document.getElementById("restoreDockBtn").onclick = (e) =>
+  runDockAction(e.currentTarget, "Restoring…", "/api/dock-restore", {}, "Original Dock restored");
+
+// Rust tells us when .app files from Finder are being dragged over the row
+window.__dropHint = function(on) {
+  document.getElementById("secondRowBar").classList.toggle("drop-target", on);
+};
+
+window.__openFolderFromDock = function(folderId, tile) {
+  if (tile > 0) document.documentElement.style.setProperty("--tile", `${Math.round(tile)}px`);
+  if (folderId && state.config.folders.some(f => f.id === folderId)) {
+    state.hoveredFolderId = folderId;
+    state.config.active_folder_id = folderId;
+    renderAll();
+  } else {
+    refreshState();
+  }
+};
+
+refreshState();
+setInterval(refreshState, 2000);
+</script>
+</body>
+</html>
