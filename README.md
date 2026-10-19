@@ -62,7 +62,7 @@ To put the Dock back exactly as it was before you installed OpenFolders, run `~/
 
 - Each folder is a tiny app bundle in `~/Applications/OpenFolders` with a generated 2×2 icon. That's what sits in your Dock.
 - A background process reads where the Dock's icons are through the macOS Accessibility API. When you hover a folder icon, it shows the row: a transparent window over the Dock with native glass behind it.
-- Folder tiles are pinned with no label, so the Dock doesn't draw its own name tag over the row; OpenFolders shows the folder name beside the row instead.
+- Folder tiles are pinned with an invisible label, so the Dock doesn't draw its own name tag over the row; OpenFolders shows the folder name beside the row instead.
 - To keep an auto-hiding Dock up while you use a row, OpenFolders turns auto-hide off for that moment through the same private call the Dock's own settings use, and turns it back on when the row closes, even if OpenFolders quits.
 - Settings live in `~/.config/openfolders/config.json`.
 

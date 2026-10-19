@@ -364,6 +364,20 @@ fn create_single_app_bundle(
                 perms.set_mode(0o755);
                 let _ = fs::set_permissions(&tmp_exe, perms);
             }
+            // The source may be signed as part of OpenFolders.app, which ties its signature to
+            // that bundle's Info.plist and stops this copy from launching. Re-sign it on its own
+            // (outside any bundle) so it carries a plain ad-hoc signature.
+            let loose = std::env::temp_dir().join(format!("openfolders-{}", std::process::id()));
+            if fs::rename(&tmp_exe, &loose).is_ok() {
+                let _ = Command::new("/usr/bin/codesign")
+                    .args(["--force", "--sign", "-"])
+                    .arg(&loose)
+                    .output();
+                if fs::copy(&loose, &tmp_exe).is_ok() {
+                    let _ = fs::set_permissions(&tmp_exe, fs::Permissions::from_mode(0o755));
+                }
+                let _ = fs::remove_file(&loose);
+            }
             let _ = fs::rename(&tmp_exe, &target_exe);
         }
     }
@@ -518,11 +532,11 @@ for app in data.get("repin_apps", []):
 
 fresh = False
 for bpath in pinned_bundles:
-    # Reuse a folder's existing tile with its label key removed: the Dock leaves such a
-    # tile unnamed, but fills in an empty label and names tiles it has never seen
+    # Folder tiles are labelled with a zero-width space: the Dock then draws no visible
+    # name over the folder's row, and keeps it (an empty or missing label it fills back in)
     old = copy.deepcopy(existing_folders.get(bpath.rstrip("/")))
     if old is not None:
-        old.setdefault("tile-data", {}).pop("file-label", None)
+        old.setdefault("tile-data", {})["file-label"] = "\u200b"
         new_apps.append(old)
         continue
     fresh = True
@@ -531,8 +545,8 @@ for bpath in pinned_bundles:
     tile = {
         "tile-type": "file-tile",
         "tile-data": {
-            # No label: the Dock then draws no name tag over the folder's pop-up row
-            # (OpenFolders shows the folder name beside the row instead)
+            # OpenFolders shows the folder name beside the row instead
+            "file-label": "\u200b",
             "file-data": {
                 "_CFURLString": url_str,
                 "_CFURLStringType": 15
@@ -566,8 +580,8 @@ if fresh:
     changed = False
     for e in dock.get("persistent-apps", []):
         td = e.get("tile-data", {})
-        if "/Applications/OpenFolders/" in get_app_path(e) and "file-label" in td:
-            del td["file-label"]
+        if "/Applications/OpenFolders/" in get_app_path(e) and td.get("file-label") != "\u200b":
+            td["file-label"] = "\u200b"
             changed = True
     if changed:
         with open(plist_path, "wb") as f:
@@ -588,6 +602,36 @@ if fresh:
     } else {
         Err("Dock plist update returned non-zero status".to_string())
     }
+}
+
+/// Puts back the invisible label on folder tiles if the Dock named them again, then
+/// restarts the Dock. Returns true if anything changed.
+pub fn hide_folder_tile_labels() -> bool {
+    let py = r#"
+import os, plistlib, subprocess, sys
+p = os.path.expanduser("~/Library/Preferences/com.apple.dock.plist")
+with open(p, "rb") as f:
+    dock = plistlib.load(f)
+changed = False
+for e in dock.get("persistent-apps", []):
+    td = e.get("tile-data", {})
+    url = td.get("file-data", {}).get("_CFURLString", "")
+    if "/Applications/OpenFolders/" in url and td.get("file-label") != "\u200b":
+        td["file-label"] = "\u200b"
+        changed = True
+if not changed:
+    sys.exit(1)
+with open(p, "wb") as f:
+    plistlib.dump(dock, f)
+subprocess.run(["killall", "cfprefsd"], stderr=subprocess.DEVNULL)
+subprocess.run(["killall", "Dock"], stderr=subprocess.DEVNULL)
+"#;
+    Command::new("/usr/bin/python3")
+        .arg("-c")
+        .arg(py)
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
 }
 
 /// Restores the original macOS Dock layout from backup.

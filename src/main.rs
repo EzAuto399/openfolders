@@ -242,6 +242,31 @@ fn folder_dock_tile(folder_id: &str) -> Option<macos::DockIconRect> {
 /// Watches for mouse hover over any Folder icon in the native macOS Dock.
 /// Hovering a folder pops its apps up in a horizontal row right above that icon;
 /// moving off both the icon and the popup closes it again.
+/// The Dock names a folder tile again whenever its bundle changes, and that name shows
+/// under the row. Watch the Dock's settings and take the name off again, while no row is open.
+fn start_dock_label_watcher(state: Arc<Mutex<SharedState>>) {
+    std::thread::spawn(move || {
+        let plist = dirs::home_dir()
+            .unwrap_or_default()
+            .join("Library/Preferences/com.apple.dock.plist");
+        let mut seen = None;
+        let mut fixes: Vec<Instant> = Vec::new();
+        loop {
+            std::thread::sleep(Duration::from_secs(3));
+            let mtime = fs::metadata(&plist).and_then(|m| m.modified()).ok();
+            if mtime == seen || state.lock().unwrap().popup_visible {
+                continue;
+            }
+            seen = mtime;
+            // Never restart the Dock in a loop if it keeps renaming the tiles
+            fixes.retain(|t| t.elapsed() < Duration::from_secs(60));
+            if fixes.len() < 3 && config::hide_folder_tile_labels() {
+                fixes.push(Instant::now());
+            }
+        }
+    });
+}
+
 fn start_dock_hover_watcher(state: Arc<Mutex<SharedState>>, proxy: EventLoopProxy<UserEvent>) {
     std::thread::spawn(move || {
         let mut cached_rects: Vec<DockIconRect> = Vec::new();
@@ -971,6 +996,7 @@ fn main() {
     let proxy = event_loop.create_proxy();
 
     start_unix_ipc_listener(proxy.clone());
+    start_dock_label_watcher(Arc::clone(&shared));
     start_dock_hover_watcher(Arc::clone(&shared), proxy.clone());
     let port = start_http_server(Arc::clone(&shared), proxy.clone());
 
