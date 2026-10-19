@@ -2,7 +2,7 @@
 
 **iPhone-style folders for the Mac Dock. Hover a folder, get its apps in a row right above it.**
 
-<!-- demo video goes here -->
+![Hovering folders in the Dock opens a row of their apps right above them](docs/demo.gif)
 
 ## Why
 
