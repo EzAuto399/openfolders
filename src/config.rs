@@ -486,6 +486,14 @@ pub fn sync_macos_dock(
     let py_script = r#"
 import sys, json, os, plistlib, urllib.parse, subprocess, copy
 
+def keep_autohide(dock):
+    # While a row holds an auto-hiding Dock open this file says auto-hide is off;
+    # never save that, or the Dock would stay up for good
+    real = os.environ.get("OPENFOLDERS_AUTOHIDE")
+    if real is not None:
+        dock["autohide"] = real == "1"
+    return dock
+
 data = json.loads(sys.argv[1])
 pinned_bundles = data["pinned_bundles"]
 unpin_apps = set(data["unpin_apps"])
@@ -565,7 +573,7 @@ if [tile_key(e) for e in apps] == [tile_key(e) for e in new_apps]:
 
 dock["persistent-apps"] = new_apps
 with open(plist_path, "wb") as f:
-    plistlib.dump(dock, f)
+    plistlib.dump(keep_autohide(dock), f)
 
 subprocess.run(["killall", "cfprefsd"], stderr=subprocess.DEVNULL)
 subprocess.run(["killall", "Dock"], stderr=subprocess.DEVNULL)
@@ -585,12 +593,12 @@ if fresh:
             changed = True
     if changed:
         with open(plist_path, "wb") as f:
-            plistlib.dump(dock, f)
+            plistlib.dump(keep_autohide(dock), f)
         subprocess.run(["killall", "cfprefsd"], stderr=subprocess.DEVNULL)
         subprocess.run(["killall", "Dock"], stderr=subprocess.DEVNULL)
 "#;
 
-    let status = Command::new("/usr/bin/python3")
+    let status = dock_python()
         .arg("-c")
         .arg(py_script)
         .arg(payload.to_string())
@@ -609,6 +617,14 @@ if fresh:
 pub fn hide_folder_tile_labels() -> bool {
     let py = r#"
 import os, plistlib, subprocess, sys
+
+def keep_autohide(dock):
+    # While a row holds an auto-hiding Dock open this file says auto-hide is off;
+    # never save that, or the Dock would stay up for good
+    real = os.environ.get("OPENFOLDERS_AUTOHIDE")
+    if real is not None:
+        dock["autohide"] = real == "1"
+    return dock
 p = os.path.expanduser("~/Library/Preferences/com.apple.dock.plist")
 with open(p, "rb") as f:
     dock = plistlib.load(f)
@@ -622,16 +638,30 @@ for e in dock.get("persistent-apps", []):
 if not changed:
     sys.exit(1)
 with open(p, "wb") as f:
-    plistlib.dump(dock, f)
+    plistlib.dump(keep_autohide(dock), f)
 subprocess.run(["killall", "cfprefsd"], stderr=subprocess.DEVNULL)
 subprocess.run(["killall", "Dock"], stderr=subprocess.DEVNULL)
 "#;
-    Command::new("/usr/bin/python3")
+    dock_python()
         .arg("-c")
         .arg(py)
         .status()
         .map(|s| s.success())
         .unwrap_or(false)
+}
+
+/// Marker left while a row holds an auto-hiding Dock open (auto-hide is really on).
+pub fn autohide_marker() -> PathBuf {
+    config_dir().join("autohide-suspended")
+}
+
+/// Python for scripts that rewrite the Dock's settings file, told the user's real auto-hide
+/// setting: the file says "off" while a row holds the Dock open.
+fn dock_python() -> Command {
+    let real = autohide_marker().exists() || crate::macos::dock_autohide_enabled();
+    let mut c = Command::new("/usr/bin/python3");
+    c.env("OPENFOLDERS_AUTOHIDE", if real { "1" } else { "0" });
+    c
 }
 
 /// Restores the original macOS Dock layout from backup.
@@ -653,6 +683,14 @@ pub fn restore_macos_dock_backup() -> Result<String, String> {
 pub fn pin_app_to_dock(app_path: &str) -> Result<(), String> {
     let py_script = r#"
 import sys, os, plistlib, urllib.parse, subprocess
+
+def keep_autohide(dock):
+    # While a row holds an auto-hiding Dock open this file says auto-hide is off;
+    # never save that, or the Dock would stay up for good
+    real = os.environ.get("OPENFOLDERS_AUTOHIDE")
+    if real is not None:
+        dock["autohide"] = real == "1"
+    return dock
 
 app = sys.argv[1].rstrip("/")
 plist_path = os.path.expanduser("~/Library/Preferences/com.apple.dock.plist")
@@ -677,11 +715,11 @@ apps.append({
 })
 dock["persistent-apps"] = apps
 with open(plist_path, "wb") as f:
-    plistlib.dump(dock, f)
+    plistlib.dump(keep_autohide(dock), f)
 subprocess.run(["killall", "cfprefsd"], stderr=subprocess.DEVNULL)
 subprocess.run(["killall", "Dock"], stderr=subprocess.DEVNULL)
 "#;
-    let status = Command::new("/usr/bin/python3")
+    let status = dock_python()
         .arg("-c")
         .arg(py_script)
         .arg(normalize_app_path(app_path))
@@ -713,6 +751,14 @@ pub fn remove_from_dock(cfg: &AppConfig) -> Result<String, String> {
     let py_script = r#"
 import sys, json, os, plistlib, urllib.parse, subprocess
 
+def keep_autohide(dock):
+    # While a row holds an auto-hiding Dock open this file says auto-hide is off;
+    # never save that, or the Dock would stay up for good
+    real = os.environ.get("OPENFOLDERS_AUTOHIDE")
+    if real is not None:
+        dock["autohide"] = real == "1"
+    return dock
+
 apps = json.loads(sys.argv[1])
 plist_path = os.path.expanduser("~/Library/Preferences/com.apple.dock.plist")
 with open(plist_path, "rb") as f:
@@ -740,11 +786,11 @@ for app in apps:
     })
 dock["persistent-apps"] = kept
 with open(plist_path, "wb") as f:
-    plistlib.dump(dock, f)
+    plistlib.dump(keep_autohide(dock), f)
 subprocess.run(["killall", "cfprefsd"], stderr=subprocess.DEVNULL)
 subprocess.run(["killall", "Dock"], stderr=subprocess.DEVNULL)
 "#;
-    let status = Command::new("/usr/bin/python3")
+    let status = dock_python()
         .arg("-c")
         .arg(py_script)
         .arg(serde_json::to_string(&apps).unwrap_or_default())

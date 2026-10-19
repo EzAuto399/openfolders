@@ -851,7 +851,7 @@ fn hide_popup(window: &tao::window::Window, st: &mut SharedState) {
 
 /// Marker left while we hold an auto-hiding Dock open, so a crash can't leave auto-hide off.
 fn autohide_marker() -> std::path::PathBuf {
-    config::config_dir().join("autohide-suspended")
+    config::autohide_marker()
 }
 
 /// Keeps an auto-hiding Dock visible while a folder row is open, so the row behaves as part

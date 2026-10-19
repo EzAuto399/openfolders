@@ -115,6 +115,13 @@ pub fn run(socket_path: &str) -> i32 {
     }
 
     println!("Row");
+    // No row is open now, so OpenFolders must not be holding the Dock up
+    let autohide_before = macos::dock_autohide_enabled();
+    r.check(
+        !config::autohide_marker().exists(),
+        "the Dock's auto-hide isn't held off",
+        "OpenFolders still holds an auto-hiding Dock open; restart it",
+    );
     let pid = main_instance_pid();
     r.check(pid.is_some(), "OpenFolders is running", "start it with ./install.sh");
     let (Some(pid), true) = (pid, !rects.is_empty()) else {
@@ -181,6 +188,13 @@ pub fn run(socket_path: &str) -> i32 {
         // Let it close before the next folder
         std::thread::sleep(Duration::from_millis(700));
     }
+    // Rows hold an auto-hiding Dock up only while open; the setting must come back unchanged
+    std::thread::sleep(Duration::from_millis(1500));
+    r.check(
+        macos::dock_autohide_enabled() == autohide_before && !config::autohide_marker().exists(),
+        &format!("auto-hide is {} again after the rows close", if autohide_before { "on" } else { "off" }),
+        format!("it was {} before, now {}", autohide_before, macos::dock_autohide_enabled()),
+    );
     summary(r)
 }
 
