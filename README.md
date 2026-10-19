@@ -4,6 +4,8 @@
 
 ![Hovering folders in the Dock opens a row of their apps right above them](docs/demo.gif)
 
+▶ [Watch the full demo video (22 s, 1080p)](docs/openfolders-demo.mp4)
+
 ## Why
 
 Too many apps in my Dock annoy me. Not having enough of them there annoys me too. I like my Dock clean and thin, not a long strip of icons.
