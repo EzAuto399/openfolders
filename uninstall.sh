@@ -18,6 +18,14 @@ sleep 0.5
 if [[ -x "$BIN" ]]; then
   "$BIN" --remove-from-dock
 fi
+
+# If OpenFolders was force-quit while a row held an auto-hiding Dock open, give it back
+MARKER="$HOME/.config/openfolders/autohide-suspended"
+if [[ -f "$MARKER" ]]; then
+  defaults write com.apple.dock autohide -bool true
+  killall Dock 2>/dev/null || true
+  rm -f "$MARKER"
+fi
 rm -rf "$APP_DIR"
 
 if [[ "${1:-}" == "--purge" ]]; then

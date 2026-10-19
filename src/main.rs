@@ -153,7 +153,7 @@ const DRAG_OUT_TIMEOUT: Duration = Duration::from_secs(30);
 fn app_bundle_paths(paths: &[std::path::PathBuf]) -> Vec<std::path::PathBuf> {
     paths
         .iter()
-        .filter(|p| p.extension().map_or(false, |e| e == "app") && p.is_dir())
+        .filter(|p| p.extension().is_some_and(|e| e == "app") && p.is_dir())
         .cloned()
         .collect()
 }
@@ -290,7 +290,7 @@ fn start_dock_hover_watcher(state: Arc<Mutex<SharedState>>, proxy: EventLoopProx
                     st.interacting,
                     st.config.folders.clone(),
                     st.dragging_out
-                        .map_or(false, |t| t.elapsed() < DRAG_OUT_TIMEOUT),
+                        .is_some_and(|t| t.elapsed() < DRAG_OUT_TIMEOUT),
                 )
             };
             // Mid drag-out: keep the row open and on its folder until the drop
@@ -991,7 +991,7 @@ fn main() {
 
     let initial_folder_id = detect_launched_folder_id();
     // A previous run may have exited while holding the Dock open
-    if !UnixStream::connect(SOCKET_PATH).is_ok() {
+    if UnixStream::connect(SOCKET_PATH).is_err() {
         resume_dock_autohide();
     }
     let initial_screen_pos = get_mouse_and_screen();

@@ -161,7 +161,7 @@ pub fn run(socket_path: &str) -> i32 {
         };
         // If the Dock moved meanwhile, it wasn't the row's fault: say so instead of failing
         let after = macos::get_macos_dock_icon_rects();
-        if folder_tile(&after, &f.name).map_or(true, |a| (a.x - t.x).abs() > 1.0) {
+        if folder_tile(&after, &f.name).is_none_or(|a| (a.x - t.x).abs() > 1.0) {
             println!("  - \"{}\": the Dock moved during the check; skipped", f.name);
             std::thread::sleep(Duration::from_millis(700));
             continue;
