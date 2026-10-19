@@ -12,6 +12,8 @@ Too many apps in my Dock annoy me. Not having enough of them there annoys me too
 
 My iPhone solved this years ago with folders, so I brought that design to the Mac. Your Dock stays the real macOS Dock, now holding a few folder icons. Each folder shows a 2×2 preview of the apps inside, like on iPhone. Hover one and its apps slide up in a second row that looks and feels like part of the Dock.
 
+I built it in a day, so expect rough edges. Improvements and pull requests are very welcome.
+
 ## What it does
 
 - **Folders in your real Dock.** It doesn't replace the Dock; it extends it. Folder icons show a 2×2 preview of their apps.
@@ -83,7 +85,7 @@ macOS has no app folders for the Dock itself: Dock stacks open as a grid or fan 
 
 ## Contributing
 
-Issues and pull requests are welcome. The code is small:
+OpenFolders was made in a day, and there's plenty left to improve: a left or right Dock, multiple displays, a prebuilt download. Issues and pull requests are welcome. The code is small:
 
 | File | What's in it |
 |---|---|
