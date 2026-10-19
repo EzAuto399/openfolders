@@ -549,6 +549,12 @@ fn handle_http_request(
                 "",
             );
         }
+        ("POST", "/api/open-accessibility-settings") => {
+            let _ = std::process::Command::new("/usr/bin/open")
+                .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
+                .status();
+            send_response(stream, "200 OK", "application/json", b"{}", "");
+        }
         ("GET", "/api/state") => {
             let running = get_running_apps();
             let cfg = {
@@ -937,6 +943,20 @@ fn main() {
         return;
     }
 
+    // A folder clicked while OpenFolders isn't running: start the real app (which holds the
+    // Accessibility permission) on that folder, rather than running from the folder's copy
+    if let (Some(fid), Ok(exe)) = (&initial_folder_id, std::env::current_exe()) {
+        let main_app = config::folders_apps_dir().join("OpenFolders.app");
+        if !exe.starts_with(&main_app) && main_app.exists() {
+            let _ = std::process::Command::new("/usr/bin/open")
+                .arg("-a")
+                .arg(&main_app)
+                .args(["--args", "--folder", fid])
+                .status();
+            return;
+        }
+    }
+
     let first_run = !config_file_path().exists();
     let mut cfg = load_or_init_config();
     if let Some(ref fid) = initial_folder_id {
@@ -1126,9 +1146,10 @@ fn main() {
                 drop(st);
 
                 let js = format!(
-                    "if (window.__openFolderFromDock) window.__openFolderFromDock({}, {});",
+                    "if (window.__openFolderFromDock) window.__openFolderFromDock({}, {}, {});",
                     serde_json::to_string(&target_fid).unwrap_or_else(|_| "\"\"".to_string()),
-                    tile_size
+                    tile_size,
+                    ensure_accessibility(false)
                 );
                 let _ = webview.evaluate_script(&js);
             }

@@ -113,6 +113,30 @@
     display: none;
   }
 
+  /* Shown in the row when Accessibility is off, so hover can't work yet */
+  .row-notice {
+    flex-shrink: 0;
+    margin: 0 4px 0 2px;
+    padding: 0 10px;
+    height: calc(var(--tile) * 0.72);
+    border: none;
+    border-radius: 999px;
+    background: var(--sys-accent, #0a84ff);
+    color: #fff;
+    font: 500 12px/1 -apple-system, BlinkMacSystemFont, sans-serif;
+    white-space: nowrap;
+    cursor: pointer;
+  }
+
+  .row-notice:hover {
+    filter: brightness(1.1);
+  }
+
+  .row-notice:focus-visible {
+    outline: 2px solid var(--glyph);
+    outline-offset: 2px;
+  }
+
   /* Vertical separator line just like macOS Dock */
   .dock-divider {
     width: 1px;
@@ -851,6 +875,7 @@ let state = {
   running: {},
   installedApps: [],
   hoveredFolderId: null,
+  hoverReady: true,
   draggedAppIndex: null,
   editingFolderId: null,
   modalColor: "#6366f1"
@@ -964,9 +989,21 @@ function renderSecondRow(folder) {
     <div class="dock-divider"></div>
     <div class="dock-plus-item" id="addAppRowBtn" data-label="Add Apps to ${escapeAttr(folder.name)}" role="button" tabindex="0" aria-label="Add apps">+</div>
     <div class="dock-plus-item" id="folderMenuBtn" data-label="${escapeAttr(folder.name)} options" role="button" tabindex="0" aria-label="Folder options">⋯</div>
+    ${state.hoverReady ? "" : `<button class="row-notice" id="hoverSetupBtn" data-label="OpenFolders needs Accessibility access to see which Dock icon you're hovering">Turn on hover</button>`}
   `;
 
   bar.innerHTML = html;
+
+  const hoverSetup = document.getElementById("hoverSetupBtn");
+  if (hoverSetup) {
+    hoverSetup.onmouseenter = () => showTooltip(hoverSetup, hoverSetup.dataset.label);
+    hoverSetup.onmouseleave = () => hideTooltip();
+    hoverSetup.onclick = () => {
+      hideTooltip();
+      apiPost("/api/open-accessibility-settings", {});
+      apiPost("/api/hide-window", {});
+    };
+  }
 
   bar.onkeydown = (e) => {
     if ((e.key === "Enter" || e.key === " ") && e.target.getAttribute("role") === "button") {
@@ -1529,7 +1566,8 @@ window.__dropHint = function(on) {
   document.getElementById("secondRowBar").classList.toggle("drop-target", on);
 };
 
-window.__openFolderFromDock = function(folderId, tile) {
+window.__openFolderFromDock = function(folderId, tile, hoverReady) {
+  state.hoverReady = hoverReady !== false;
   // `tile` is the Dock tile's width, which is 2 pt wider than the icon drawn in it
   if (tile > 2) document.documentElement.style.setProperty("--tile", `${Math.round(tile - 2)}px`);
   if (folderId && state.config.folders.some(f => f.id === folderId)) {
