@@ -3,7 +3,8 @@ use std::io::Cursor;
 
 pub fn parse_hex_color(hex: &str) -> (u8, u8, u8) {
     let h = hex.trim_start_matches('#');
-    if h.len() >= 6 {
+    // Byte slicing below needs ASCII; a hand-edited colour like "#ééé" would panic
+    if h.len() >= 6 && h.is_ascii() {
         let r = u8::from_str_radix(&h[0..2], 16).unwrap_or(99);
         let g = u8::from_str_radix(&h[2..4], 16).unwrap_or(102);
         let b = u8::from_str_radix(&h[4..6], 16).unwrap_or(241);

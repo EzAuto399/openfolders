@@ -70,6 +70,12 @@ cat > "$AGENT" <<PLIST
   </array>
   <key>RunAtLoad</key>
   <true/>
+  <!-- Come back after a crash, but not after you quit it -->
+  <key>KeepAlive</key>
+  <dict>
+    <key>SuccessfulExit</key>
+    <false/>
+  </dict>
   <key>ProcessType</key>
   <string>Interactive</string>
 </dict>

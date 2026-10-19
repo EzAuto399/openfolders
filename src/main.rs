@@ -34,7 +34,11 @@ use tao::{
 };
 use wry::{DragDropEvent, WebViewBuilder};
 
-const SOCKET_PATH: &str = "/tmp/openfolders_ipc.sock";
+/// Folder bundles tell the running app which folder was clicked through this socket. It lives
+/// in the user's own config folder: in shared /tmp another account could claim the name first.
+fn socket_path() -> std::path::PathBuf {
+    config::config_dir().join("ipc.sock")
+}
 const POPUP_DEFAULT_WIDTH: f64 = 520.0;
 const POPUP_HEIGHT_COMPACT: f64 = 128.0;
 /// How long the cursor may sit outside both the Dock icon and the popup before it closes.
@@ -130,6 +134,25 @@ fn foldered_apps(cfg: &AppConfig) -> std::collections::HashSet<String> {
 }
 
 /// Records a change in folder membership so the Dock follows it once the row closes.
+/// Rebuilds folder bundles off the state lock: it codesigns each one and takes seconds,
+/// and holding the lock that long would freeze hover and the row.
+fn rebuild_bundles_in_background(state: &Arc<Mutex<SharedState>>) {
+    let state = Arc::clone(state);
+    std::thread::spawn(move || {
+        let (cfg, mut cache) = {
+            let mut st = state.lock().unwrap_or_else(|e| e.into_inner());
+            (st.config.clone(), std::mem::take(&mut st.icon_cache))
+        };
+        let _ = build_folder_app_bundles(&cfg, &mut cache);
+        state.lock().unwrap_or_else(|e| e.into_inner()).icon_cache.extend(cache);
+    });
+}
+
+/// Each folder's bundle name, which is what the Dock tile points at.
+fn bundle_names(cfg: &AppConfig) -> Vec<String> {
+    cfg.folders.iter().map(|f| config::sanitize_bundle_name(&f.name)).collect()
+}
+
 fn note_folder_change(st: &mut SharedState, before: &std::collections::HashSet<String>) {
     if !st.config.keep_dock_clean {
         return;
@@ -182,7 +205,7 @@ fn detect_launched_folder_id() -> Option<String> {
 }
 
 fn try_notify_existing_instance(folder_id: Option<String>, screen_pos: ScreenPosition) -> bool {
-    if let Ok(mut stream) = UnixStream::connect(SOCKET_PATH) {
+    if let Ok(mut stream) = UnixStream::connect(socket_path()) {
         let _ = stream.set_write_timeout(Some(Duration::from_millis(250)));
         let msg = IpcTriggerMessage {
             folder_id,
@@ -198,8 +221,8 @@ fn try_notify_existing_instance(folder_id: Option<String>, screen_pos: ScreenPos
 }
 
 fn start_unix_ipc_listener(proxy: EventLoopProxy<UserEvent>) {
-    let _ = fs::remove_file(SOCKET_PATH);
-    if let Ok(listener) = UnixListener::bind(SOCKET_PATH) {
+    let _ = fs::remove_file(socket_path());
+    if let Ok(listener) = UnixListener::bind(socket_path()) {
         std::thread::spawn(move || {
             for stream in listener.incoming().flatten() {
                 let mut buf = Vec::new();
@@ -251,17 +274,30 @@ fn start_dock_label_watcher(state: Arc<Mutex<SharedState>>) {
             .join("Library/Preferences/com.apple.dock.plist");
         let mut seen = None;
         let mut fixes: Vec<Instant> = Vec::new();
+        // Fixes in a row with no settled read between them; if the Dock keeps undoing
+        // the label, stop restarting it until a later read finds the labels intact.
+        let mut streak = 0;
         loop {
             std::thread::sleep(Duration::from_secs(3));
             let mtime = fs::metadata(&plist).and_then(|m| m.modified()).ok();
-            if mtime == seen || state.lock().unwrap().popup_visible {
+            if mtime == seen || state.lock().unwrap_or_else(|e| e.into_inner()).popup_visible {
                 continue;
             }
             seen = mtime;
-            // Never restart the Dock in a loop if it keeps renaming the tiles
             fixes.retain(|t| t.elapsed() < Duration::from_secs(60));
-            if fixes.len() < 3 && config::hide_folder_tile_labels() {
-                fixes.push(Instant::now());
+            if streak >= 5 {
+                if !config::folder_tile_labels_need_fix() {
+                    streak = 0;
+                }
+                continue;
+            }
+            if fixes.len() < 3 {
+                if config::hide_folder_tile_labels() {
+                    fixes.push(Instant::now());
+                    streak += 1;
+                } else {
+                    streak = 0;
+                }
             }
         }
     });
@@ -282,7 +318,7 @@ fn start_dock_hover_watcher(state: Arc<Mutex<SharedState>>, proxy: EventLoopProx
             let pos = get_mouse_and_screen();
 
             let (visible, (rx, ry, rw, rh), expanded, interacting, folders, dragging) = {
-                let st = state.lock().unwrap();
+                let st = state.lock().unwrap_or_else(|e| e.into_inner());
                 (
                     st.popup_visible,
                     st.popup_rect,
@@ -359,7 +395,7 @@ fn start_dock_hover_watcher(state: Arc<Mutex<SharedState>>, proxy: EventLoopProx
                 }
             } else if let Some((fid, center_x, top_y, tile)) = matched_folder {
                 outside_since = None;
-                let open_folder = state.lock().unwrap().last_folder_id.clone();
+                let open_folder = state.lock().unwrap_or_else(|e| e.into_inner()).last_folder_id.clone();
                 let intent_met = if !visible || fid == open_folder {
                     pending_switch = None;
                     true
@@ -483,6 +519,17 @@ fn start_http_server(state: Arc<Mutex<SharedState>>, proxy: EventLoopProxy<UserE
                     }
                 }
 
+                // Only OpenFolders' own page knows the token. Without it any web page in a
+                // browser could find this port and launch or quit apps. Checked before reading
+                // a body, and bodies are capped, so a stranger can't make us allocate.
+                if full_path.starts_with("/api/") && !request_has_token(&header_str, full_path) {
+                    send_response(&mut stream, "403 Forbidden", "text/plain", b"Forbidden", "");
+                    return;
+                }
+                if content_len > 4 * 1024 * 1024 {
+                    send_response(&mut stream, "413 Payload Too Large", "text/plain", b"Too large", "");
+                    return;
+                }
                 let mut body_bytes = buf[hdr_end..total_read].to_vec();
                 while body_bytes.len() < content_len {
                     let mut more = vec![0u8; content_len - body_bytes.len()];
@@ -492,12 +539,6 @@ fn start_http_server(state: Arc<Mutex<SharedState>>, proxy: EventLoopProxy<UserE
                     }
                 }
 
-                // Only OpenFolders' own page knows the token. Without it any web page in a
-                // browser could find this port and launch or quit apps.
-                if full_path.starts_with("/api/") && !request_has_token(&header_str, full_path) {
-                    send_response(&mut stream, "403 Forbidden", "text/plain", b"Forbidden", "");
-                    return;
-                }
                 handle_http_request(
                     &mut stream,
                     method,
@@ -597,7 +638,7 @@ fn handle_http_request(
         ("GET", "/api/state") => {
             let running = get_running_apps();
             let cfg = {
-                let st = state.lock().unwrap();
+                let st = state.lock().unwrap_or_else(|e| e.into_inner());
                 st.config.clone()
             };
             let json = serde_json::json!({
@@ -609,7 +650,7 @@ fn handle_http_request(
         }
         ("GET", "/api/installed-apps") => {
             let apps = {
-                let mut st = state.lock().unwrap();
+                let mut st = state.lock().unwrap_or_else(|e| e.into_inner());
                 if st.installed_apps_cache.is_empty() {
                     st.installed_apps_cache = scan_installed_apps();
                 }
@@ -629,7 +670,7 @@ fn handle_http_request(
                 }
             }
             let png_opt = {
-                let mut st = state.lock().unwrap();
+                let mut st = state.lock().unwrap_or_else(|e| e.into_inner());
                 get_cached_app_icon(&app_path, &mut st.icon_cache)
             };
             if let Some(png) = png_opt {
@@ -647,18 +688,18 @@ fn handle_http_request(
         ("POST", "/api/save-config") => {
             if let Ok(new_cfg) = serde_json::from_slice::<AppConfig>(body) {
                 {
-                    let mut st = state.lock().unwrap();
+                    let mut st = state.lock().unwrap_or_else(|e| e.into_inner());
                     let before = foldered_apps(&st.config);
+                    let names_before = bundle_names(&st.config);
                     st.config = new_cfg.clone();
                     note_folder_change(&mut st, &before);
+                    // A renamed, added or deleted folder is a different bundle: re-pin when the row closes
+                    if bundle_names(&st.config) != names_before {
+                        st.dock_dirty = true;
+                    }
                     let _ = save_config(&st.config);
                 }
-                let state_bg = Arc::clone(state);
-                std::thread::spawn(move || {
-                    let mut st = state_bg.lock().unwrap();
-                    let cfg_clone = st.config.clone();
-                    let _ = build_folder_app_bundles(&cfg_clone, &mut st.icon_cache);
-                });
+                rebuild_bundles_in_background(&state);
                 send_response(stream, "200 OK", "application/json", br#"{"ok":true}"#, "");
             } else {
                 send_response(
@@ -749,7 +790,7 @@ fn handle_http_request(
             let mut removed = false;
             let mut pinned = false;
             {
-                let mut st = state.lock().unwrap();
+                let mut st = state.lock().unwrap_or_else(|e| e.into_inner());
                 if req.active {
                     st.dragging_out = Some(Instant::now());
                 } else {
@@ -788,12 +829,7 @@ fn handle_http_request(
                 }
             }
             if removed {
-                let state_bg = Arc::clone(state);
-                std::thread::spawn(move || {
-                    let mut st = state_bg.lock().unwrap();
-                    let cfg_clone = st.config.clone();
-                    let _ = build_folder_app_bundles(&cfg_clone, &mut st.icon_cache);
-                });
+                rebuild_bundles_in_background(&state);
             }
             let json = serde_json::json!({ "ok": true, "removed": removed, "pinned": pinned });
             let bytes = serde_json::to_vec(&json).unwrap_or_default();
@@ -812,13 +848,13 @@ fn handle_http_request(
             let unpin = serde_json::from_slice::<SyncReq>(body)
                 .map(|r| r.unpin_grouped_apps)
                 .unwrap_or(false);
-            let res = {
-                let mut st = state.lock().unwrap();
-                let cfg = st.config.clone();
+            // Apps just taken out of a folder still go back to the Dock
+            let (cfg, repin) = {
+                let mut st = state.lock().unwrap_or_else(|e| e.into_inner());
                 st.dock_dirty = false;
-                st.repin.clear();
-                sync_macos_dock(&cfg, unpin, &[], &mut st.icon_cache)
+                (st.config.clone(), std::mem::take(&mut st.repin))
             };
+            let res = sync_macos_dock(&cfg, unpin, &repin, &mut HashMap::new());
             let json = match res {
                 Ok(msg) => serde_json::json!({ "ok": true, "message": msg }),
                 Err(err) => serde_json::json!({ "ok": false, "message": err }),
@@ -878,12 +914,12 @@ fn hide_popup(window: &tao::window::Window, st: &mut SharedState) {
     st.interacting = false;
     resume_dock_autohide();
     // Apply folder edits to the Dock now that nobody is hovering it (a Dock rewrite restarts it)
-    if st.dock_dirty && st.config.keep_dock_clean {
+    if st.dock_dirty {
         st.dock_dirty = false;
         let cfg = st.config.clone();
         let repin = std::mem::take(&mut st.repin);
         std::thread::spawn(move || {
-            let _ = sync_macos_dock(&cfg, true, &repin, &mut HashMap::new());
+            let _ = sync_macos_dock(&cfg, cfg.keep_dock_clean, &repin, &mut HashMap::new());
         });
     }
 }
@@ -922,7 +958,7 @@ fn resume_dock_autohide() {
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     if args.iter().any(|a| a == "--self-test") {
-        std::process::exit(selftest::run(SOCKET_PATH));
+        std::process::exit(selftest::run(&socket_path()));
     }
     if args.iter().any(|a| a == "--check-accessibility") {
         let trusted = ensure_accessibility(false);
@@ -991,7 +1027,7 @@ fn main() {
 
     let initial_folder_id = detect_launched_folder_id();
     // A previous run may have exited while holding the Dock open
-    if UnixStream::connect(SOCKET_PATH).is_err() {
+    if UnixStream::connect(socket_path()).is_err() {
         resume_dock_autohide();
     }
     let initial_screen_pos = get_mouse_and_screen();
@@ -1048,12 +1084,7 @@ fn main() {
     }));
 
     {
-        let shared_bg = Arc::clone(&shared);
-        std::thread::spawn(move || {
-            let mut st = shared_bg.lock().unwrap();
-            let cfg_clone = st.config.clone();
-            let _ = build_folder_app_bundles(&cfg_clone, &mut st.icon_cache);
-        });
+        rebuild_bundles_in_background(&shared);
     }
 
     // Hover needs Accessibility access to read where the Dock's icons are
@@ -1063,9 +1094,8 @@ fn main() {
     if first_run {
         let shared_bg = Arc::clone(&shared);
         std::thread::spawn(move || {
-            let mut st = shared_bg.lock().unwrap();
-            let cfg_clone = st.config.clone();
-            let _ = sync_macos_dock(&cfg_clone, false, &[], &mut st.icon_cache);
+            let cfg = shared_bg.lock().unwrap_or_else(|e| e.into_inner()).config.clone();
+            let _ = sync_macos_dock(&cfg, false, &[], &mut HashMap::new());
         });
     }
 
@@ -1087,7 +1117,7 @@ fn main() {
     set_accessory_activation_policy();
 
     let (ox, oy, ow, oh) = {
-        let mut st = shared.lock().unwrap();
+        let mut st = shared.lock().unwrap_or_else(|e| e.into_inner());
         let frame = compute_popup_frame(&st);
         st.popup_rect = frame;
         frame
@@ -1164,7 +1194,7 @@ fn main() {
                 tile,
                 is_hover,
             }) => {
-                let mut st = shared.lock().unwrap();
+                let mut st = shared.lock().unwrap_or_else(|e| e.into_inner());
                 let target_fid = folder_id.unwrap_or_else(|| st.config.active_folder_id.clone());
                 let same_folder = st.last_folder_id == target_fid;
                 let elapsed = st.last_shown_at.elapsed();
@@ -1224,7 +1254,7 @@ fn main() {
                 row,
                 panel,
             }) => {
-                let mut st = shared.lock().unwrap();
+                let mut st = shared.lock().unwrap_or_else(|e| e.into_inner());
                 st.panel = panel;
                 st.modal_expanded = expanded;
                 st.content_width = width;
@@ -1233,7 +1263,7 @@ fn main() {
                 place_window(&window, &mut st, backdrop);
             }
             Event::UserEvent(UserEvent::BeginInteraction) => {
-                let mut st = shared.lock().unwrap();
+                let mut st = shared.lock().unwrap_or_else(|e| e.into_inner());
                 if !st.popup_visible || st.interacting {
                     return;
                 }
@@ -1244,7 +1274,7 @@ fn main() {
                 window.set_focus();
             }
             Event::UserEvent(UserEvent::AutoHide) => {
-                let mut st = shared.lock().unwrap();
+                let mut st = shared.lock().unwrap_or_else(|e| e.into_inner());
                 if !st.popup_visible || st.modal_expanded {
                     return;
                 }
@@ -1256,7 +1286,7 @@ fn main() {
                 }
             }
             Event::UserEvent(UserEvent::HideWindow) => {
-                let mut st = shared.lock().unwrap();
+                let mut st = shared.lock().unwrap_or_else(|e| e.into_inner());
                 hide_popup(&window, &mut st);
                 st.prev_front_pid = 0;
             }
@@ -1264,7 +1294,7 @@ fn main() {
                 event: WindowEvent::Focused(false),
                 ..
             } => {
-                let mut st = shared.lock().unwrap();
+                let mut st = shared.lock().unwrap_or_else(|e| e.into_inner());
                 if st.config.hide_on_blur
                     && st.interacting
                     && !st.modal_expanded
@@ -1274,7 +1304,7 @@ fn main() {
                 }
             }
             Event::UserEvent(UserEvent::AppsDropped(paths)) => {
-                let mut st = shared.lock().unwrap();
+                let mut st = shared.lock().unwrap_or_else(|e| e.into_inner());
                 let before = foldered_apps(&st.config);
                 let fid = st.last_folder_id.clone();
                 let mut added: Vec<String> = Vec::new();
@@ -1298,12 +1328,7 @@ fn main() {
                 let _ = save_config(&st.config);
                 note_folder_change(&mut st, &before);
                 drop(st);
-                let state_bg = Arc::clone(&shared);
-                std::thread::spawn(move || {
-                    let mut st = state_bg.lock().unwrap();
-                    let cfg_clone = st.config.clone();
-                    let _ = build_folder_app_bundles(&cfg_clone, &mut st.icon_cache);
-                });
+                rebuild_bundles_in_background(&shared);
                 let msg = if added.len() == 1 {
                     format!("Added {}", added[0])
                 } else {
@@ -1326,7 +1351,7 @@ fn main() {
                 event: WindowEvent::CloseRequested,
                 ..
             } => {
-                let mut st = shared.lock().unwrap();
+                let mut st = shared.lock().unwrap_or_else(|e| e.into_inner());
                 hide_popup(&window, &mut st);
             }
             _ => {}

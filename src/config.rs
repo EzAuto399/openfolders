@@ -77,6 +77,8 @@ pub fn load_or_init_config() -> AppConfig {
                 }
             }
         }
+        // Unreadable: keep a copy before starting over, so the user's folders aren't lost
+        let _ = fs::copy(&path, path.with_extension("json.broken"));
     }
 
     let default_cfg = build_default_config();
@@ -87,7 +89,10 @@ pub fn load_or_init_config() -> AppConfig {
 pub fn save_config(cfg: &AppConfig) -> Result<(), String> {
     let path = config_file_path();
     let json = serde_json::to_string_pretty(cfg).map_err(|e| e.to_string())?;
-    fs::write(&path, json).map_err(|e| e.to_string())
+    // Write a temp file and swap it in, so a crash mid-write never leaves half a file
+    let tmp = path.with_extension(format!("json.{}.tmp", std::process::id()));
+    fs::write(&tmp, json).map_err(|e| e.to_string())?;
+    fs::rename(&tmp, &path).map_err(|e| e.to_string())
 }
 
 fn make_existing_entries(candidates: &[(&str, &str)]) -> Vec<AppEntry> {
@@ -291,10 +296,20 @@ pub fn sanitize_bundle_name(name: &str) -> String {
 
 /// Builds or updates the standalone macOS `.app` bundle for a folder (with its auto-generated 2x2 iPhone icon)
 /// AND the main `OpenFolders.app` bundle in `~/Applications/OpenFolders/`.
+/// Dock edits rewrite one settings file and bundle builds share temp names: each takes a turn,
+/// so two at once can't drop each other's changes. Always take DOCK_EDIT before BUNDLE_BUILD.
+static DOCK_EDIT: std::sync::Mutex<()> = std::sync::Mutex::new(());
+static BUNDLE_BUILD: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn dock_edit_turn() -> std::sync::MutexGuard<'static, ()> {
+    DOCK_EDIT.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 pub fn build_folder_app_bundles(
     cfg: &AppConfig,
     mem_cache: &mut HashMap<String, Vec<u8>>,
 ) -> Result<Vec<PathBuf>, String> {
+    let _turn = BUNDLE_BUILD.lock().unwrap_or_else(|e| e.into_inner());
     let current_exe = std::env::current_exe().map_err(|e| e.to_string())?;
     let out_dir = folders_apps_dir();
     let mut created_bundles = Vec::new();
@@ -332,6 +347,22 @@ pub fn build_folder_app_bundles(
         )?;
         if folder.pinned_to_dock {
             created_bundles.push(bundle_path);
+        }
+    }
+
+    // Remove bundles of folders that were renamed or deleted (only ones OpenFolders made)
+    let current: std::collections::HashSet<String> = cfg
+        .folders
+        .iter()
+        .map(|f| format!("{}.app", sanitize_bundle_name(&f.name)))
+        .collect();
+    if let Ok(entries) = fs::read_dir(&out_dir) {
+        for e in entries.flatten() {
+            let name = e.file_name().to_string_lossy().to_string();
+            let ours = e.path().join("Contents/Resources/folder_id.txt").exists();
+            if ours && name.ends_with(".app") && name != "OpenFolders.app" && !current.contains(&name) {
+                let _ = fs::remove_dir_all(e.path());
+            }
         }
     }
 
@@ -449,6 +480,7 @@ pub fn sync_macos_dock(
     repin_apps: &[String],
     mem_cache: &mut HashMap<String, Vec<u8>>,
 ) -> Result<String, String> {
+    let _turn = dock_edit_turn();
     let pinned_bundles = build_folder_app_bundles(cfg, mem_cache)?;
     let backup = dock_backup_path();
 
@@ -615,6 +647,16 @@ if fresh:
 /// Puts back the invisible label on folder tiles if the Dock named them again, then
 /// restarts the Dock. Returns true if anything changed.
 pub fn hide_folder_tile_labels() -> bool {
+    let _turn = dock_edit_turn();
+    folder_tile_labels_script(false)
+}
+
+/// Whether any folder tile shows a label again, without touching the Dock.
+pub fn folder_tile_labels_need_fix() -> bool {
+    folder_tile_labels_script(true)
+}
+
+fn folder_tile_labels_script(check_only: bool) -> bool {
     let py = r#"
 import os, plistlib, subprocess, sys
 
@@ -637,15 +679,19 @@ for e in dock.get("persistent-apps", []):
         changed = True
 if not changed:
     sys.exit(1)
+if sys.argv[1:] == ["check"]:
+    sys.exit(0)
 with open(p, "wb") as f:
     plistlib.dump(keep_autohide(dock), f)
 subprocess.run(["killall", "cfprefsd"], stderr=subprocess.DEVNULL)
 subprocess.run(["killall", "Dock"], stderr=subprocess.DEVNULL)
 "#;
-    dock_python()
-        .arg("-c")
-        .arg(py)
-        .status()
+    let mut cmd = dock_python();
+    cmd.arg("-c").arg(py);
+    if check_only {
+        cmd.arg("check");
+    }
+    cmd.status()
         .map(|s| s.success())
         .unwrap_or(false)
 }
@@ -666,6 +712,7 @@ fn dock_python() -> Command {
 
 /// Restores the original macOS Dock layout from backup.
 pub fn restore_macos_dock_backup() -> Result<String, String> {
+    let _turn = dock_edit_turn();
     let backup = dock_backup_path();
     if !backup.exists() {
         return Err("No Dock backup found yet.".to_string());
@@ -681,6 +728,7 @@ pub fn restore_macos_dock_backup() -> Result<String, String> {
 /// Pins one app to the end of the macOS Dock (used when an app is dragged out of a folder
 /// and dropped on the Dock). No-op if it is already pinned.
 pub fn pin_app_to_dock(app_path: &str) -> Result<(), String> {
+    let _turn = dock_edit_turn();
     let py_script = r#"
 import sys, os, plistlib, urllib.parse, subprocess
 
@@ -743,6 +791,7 @@ fn xml_escape(s: &str) -> String {
 /// Undoes OpenFolders in the Dock without touching anything else: removes the folder tiles
 /// and pins every foldered app that isn't already in the Dock. Used by uninstall.
 pub fn remove_from_dock(cfg: &AppConfig) -> Result<String, String> {
+    let _turn = dock_edit_turn();
     let apps: Vec<String> = cfg
         .folders
         .iter()

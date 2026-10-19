@@ -1150,8 +1150,9 @@ function openFolderMenu(x, y, folder) {
       e.stopPropagation();
       closeContextMenu();
       const act = el.dataset.act;
-      if (act === "add") openAppPicker(folder);
-      else if (act === "edit") openFolderModal(folder);
+      const cur = state.config.folders.find(f => f.id === folder.id);
+      if (act === "add" && cur) openAppPicker(cur);
+      else if (act === "edit" && cur) openFolderModal(cur);
       else if (act === "new") openFolderModal(null);
       else if (act === "sync") openDockSyncModal();
     };
@@ -1198,10 +1199,14 @@ function openAppContextMenu(x, y, folder, idx, appName, appPath) {
       closeContextMenu();
       const act = el.dataset.act;
       const moveId = el.dataset.move;
+      // Config may have been refreshed while the menu was open: find the app again
+      const src = state.config.folders.find(f => f.id === folder.id);
+      const at = src ? src.apps.findIndex(a => a.path === appPath) : -1;
+      if ((moveId || act === "remove") && at < 0) return;
       if (moveId) {
         const dst = state.config.folders.find(x => x.id === moveId);
         if (dst) {
-          const [moved] = folder.apps.splice(idx, 1);
+          const [moved] = src.apps.splice(at, 1);
           if (!dst.apps.some(a => a.path === moved.path)) dst.apps.push(moved);
           showToast(`Moved ${appName} to ${dst.name}`);
           renderAll();
@@ -1210,7 +1215,7 @@ function openAppContextMenu(x, y, folder, idx, appName, appPath) {
         return;
       }
       if (act === "remove") {
-        folder.apps.splice(idx, 1);
+        src.apps.splice(at, 1);
         renderAll();
         await saveConfig();
         showToast(`Removed ${appName}`);
@@ -1444,15 +1449,25 @@ function openDockSyncModal() {
   syncLayout();
 }
 
+// A refresh that started before a save would bring back the old config; drop it
+let saveGen = 0, savesInFlight = 0;
 async function saveConfig() {
-  await apiPost("/api/save-config", state.config);
+  saveGen++;
+  savesInFlight++;
+  try {
+    await apiPost("/api/save-config", state.config);
+  } finally {
+    savesInFlight--;
+  }
 }
 
 async function refreshState() {
   // Never re-render under an in-progress drag
   if (state.draggedAppIndex !== null) return;
+  const gen = saveGen;
   try {
     const data = await apiGet("/api/state");
+    if (gen !== saveGen || savesInFlight) return;
     if (data && data.config) {
       state.config = data.config;
       state.running = data.running || {};

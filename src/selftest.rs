@@ -49,7 +49,7 @@ fn main_instance_pid() -> Option<i32> {
         .find(|p| *p != me)
 }
 
-pub fn run(socket_path: &str) -> i32 {
+pub fn run(socket_path: &Path) -> i32 {
     let mut r = Report { failed: 0 };
     let cfg = load_or_init_config();
 

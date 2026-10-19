@@ -32,6 +32,12 @@ pub struct ScreenPosition {
     pub dock_bottom_inset: f64,
 }
 
+/// An autoreleased NSString; the caller's autorelease pool frees it.
+unsafe fn ns_str(s: &str) -> id {
+    let s = NSString::alloc(nil).init_str(s);
+    msg_send![s, autorelease]
+}
+
 pub fn set_accessory_activation_policy() {
     unsafe {
         let app: id = NSApplication::sharedApplication(nil);
@@ -121,10 +127,10 @@ pub fn dock_tile_size() -> Option<f64> {
     unsafe {
         let pool = NSAutoreleasePool::new(nil);
         let defaults: id = msg_send![class!(NSUserDefaults), standardUserDefaults];
-        let domain: id = msg_send![defaults, persistentDomainForName: NSString::alloc(nil).init_str("com.apple.dock")];
+        let domain: id = msg_send![defaults, persistentDomainForName: ns_str("com.apple.dock")];
         let mut size = None;
         if domain != nil {
-            let v: id = msg_send![domain, objectForKey: NSString::alloc(nil).init_str("tilesize")];
+            let v: id = msg_send![domain, objectForKey: ns_str("tilesize")];
             if v != nil {
                 let d: f64 = msg_send![v, doubleValue];
                 if d >= 16.0 {
@@ -154,10 +160,13 @@ extern "C" {
 /// with `prompt`, macOS shows its "allow in Privacy & Security" dialog if it isn't.
 pub fn ensure_accessibility(prompt: bool) -> bool {
     unsafe {
-        let key = NSString::alloc(nil).init_str("AXTrustedCheckOptionPrompt");
+        let pool = NSAutoreleasePool::new(nil);
+        let key = ns_str("AXTrustedCheckOptionPrompt");
         let value: id = msg_send![class!(NSNumber), numberWithBool: prompt];
         let dict: id = msg_send![class!(NSDictionary), dictionaryWithObject: value forKey: key];
-        AXIsProcessTrustedWithOptions(dict)
+        let trusted = AXIsProcessTrustedWithOptions(dict);
+        let _: () = msg_send![pool, drain];
+        trusted
     }
 }
 
@@ -274,7 +283,7 @@ pub fn extract_app_icon_png(app_path: &str, pixel_size: u32) -> Option<Vec<u8>> 
             if workspace == nil {
                 return None;
             }
-            let ns_path = NSString::alloc(nil).init_str(&resolved_path);
+            let ns_path = ns_str(&resolved_path);
             let icon: id = msg_send![workspace, iconForFile: ns_path];
             if icon == nil {
                 return None;
@@ -284,7 +293,7 @@ pub fn extract_app_icon_png(app_path: &str, pixel_size: u32) -> Option<Vec<u8>> 
             let _: () = msg_send![icon, setSize: target_size];
 
             // Create an explicit NSBitmapImageRep of exact pixel dimensions so Retina scaling never skews size
-            let color_space_name = NSString::alloc(nil).init_str("NSCalibratedRGBColorSpace");
+            let color_space_name = ns_str("NSCalibratedRGBColorSpace");
             let rep: id = msg_send![class!(NSBitmapImageRep), alloc];
             let rep: id = msg_send![
                 rep,
@@ -302,6 +311,7 @@ pub fn extract_app_icon_png(app_path: &str, pixel_size: u32) -> Option<Vec<u8>> 
             if rep == nil {
                 return None;
             }
+            let rep: id = msg_send![rep, autorelease];
             let _: () = msg_send![rep, setSize: target_size];
 
             let gfx_ctx: id =
@@ -370,8 +380,9 @@ pub fn set_custom_icon_on_path(target_path: &str, png_bytes: &[u8]) -> bool {
             if image == nil {
                 return false;
             }
+            let image: id = msg_send![image, autorelease];
             let workspace: id = msg_send![class!(NSWorkspace), sharedWorkspace];
-            let ns_path = NSString::alloc(nil).init_str(target_path);
+            let ns_path = ns_str(target_path);
             let success: BOOL = msg_send![
                 workspace,
                 setIcon: image
@@ -608,11 +619,11 @@ pub fn get_macos_dock_icon_rects() -> Vec<DockIconRect> {
             return out;
         }
 
-        let attr_children = NSString::alloc(nil).init_str("AXChildren");
-        let attr_title = NSString::alloc(nil).init_str("AXTitle");
-        let attr_pos = NSString::alloc(nil).init_str("AXPosition");
-        let attr_size = NSString::alloc(nil).init_str("AXSize");
-        let attr_url = NSString::alloc(nil).init_str("AXURL");
+        let attr_children = ns_str("AXChildren");
+        let attr_title = ns_str("AXTitle");
+        let attr_pos = ns_str("AXPosition");
+        let attr_size = ns_str("AXSize");
+        let attr_url = ns_str("AXURL");
 
         let mut dock_children: *const c_void = std::ptr::null();
         if AXUIElementCopyAttributeValue(ax_dock, attr_children, &mut dock_children) == 0
@@ -732,7 +743,7 @@ pub fn onscreen_window_frames(pid: i32) -> Vec<(f64, f64, f64, f64)> {
         if !list.is_null() {
             let arr = list as id;
             let count: usize = msg_send![arr, count];
-            let key = |s: &str| NSString::alloc(nil).init_str(s);
+            let key = |s: &str| ns_str(s);
             for i in 0..count {
                 let info: id = msg_send![arr, objectAtIndex: i];
                 let owner: id = msg_send![info, objectForKey: key("kCGWindowOwnerPID")];
