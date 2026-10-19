@@ -231,6 +231,8 @@ fn start_dock_hover_watcher(state: Arc<Mutex<SharedState>>, proxy: EventLoopProx
         let mut last_hovered_folder: Option<String> = None;
         let mut outside_since: Option<Instant> = None;
         let mut pending_switch: Option<(String, Instant)> = None;
+        // Where the open row is anchored, to follow its icon if the Dock moves
+        let mut last_anchor: (f64, f64) = (0.0, 0.0);
 
         loop {
             std::thread::sleep(Duration::from_millis(60));
@@ -257,16 +259,10 @@ fn start_dock_hover_watcher(state: Arc<Mutex<SharedState>>, proxy: EventLoopProx
             // Only inspect Dock icons when mouse is near the bottom of the screen
             let mut matched_folder: Option<(String, f64, f64, f64)> = None;
             if pos.mouse_y_top_left >= pos.screen_height - 140.0 {
-                // An auto-hidden or magnified Dock moves its icons, so refresh often while the
-                // cursor is over it and the cached rects don't contain the cursor.
-                let cursor_on_cached = cached_rects.iter().any(|r| {
-                    pos.mouse_x >= r.x
-                        && pos.mouse_x <= r.x + r.width
-                        && pos.mouse_y_top_left >= r.y - 12.0
-                        && pos.mouse_y_top_left <= r.y + r.height + 12.0
-                });
-                let max_age = if cursor_on_cached { 2500 } else { 250 };
-                if last_rect_fetch.elapsed() > Duration::from_millis(max_age) || cached_rects.is_empty() {
+                // Dock icons move: auto-hide slides them in, Dock restarts re-lay them out,
+                // magnification grows them. Re-read often while the cursor is down here
+                // (the Accessibility read takes well under a millisecond).
+                if last_rect_fetch.elapsed() > Duration::from_millis(300) || cached_rects.is_empty() {
                     cached_rects = get_macos_dock_icon_rects();
                     last_rect_fetch = Instant::now();
                 }
@@ -333,8 +329,14 @@ fn start_dock_hover_watcher(state: Arc<Mutex<SharedState>>, proxy: EventLoopProx
                         }
                     }
                 };
-                if intent_met && (last_hovered_folder.as_deref() != Some(&fid) || !visible) {
+                let anchor_moved = visible
+                    && fid == open_folder
+                    && ((last_anchor.0 - center_x).abs() > 1.0 || (last_anchor.1 - top_y).abs() > 1.0);
+                if intent_met
+                    && (last_hovered_folder.as_deref() != Some(&fid) || !visible || anchor_moved)
+                {
                     pending_switch = None;
+                    last_anchor = (center_x, top_y);
                     last_hovered_folder = Some(fid.clone());
                     let mut hover_pos = pos.clone();
                     hover_pos.mouse_x = center_x;
@@ -1045,8 +1047,12 @@ fn main() {
                     hide_popup(&window, &mut st);
                     return;
                 }
-                // Re-hovering the folder that is already open: nothing to do
+                // Same folder already open: just follow its icon if the Dock moved it
                 if is_hover && st.popup_visible && same_folder {
+                    st.anchor_x = screen_pos.mouse_x;
+                    st.anchor_top = anchor_top;
+                    st.current_screen_pos = screen_pos;
+                    place_window(&window, &mut st, backdrop);
                     return;
                 }
 
