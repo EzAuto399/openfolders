@@ -875,6 +875,12 @@ fn resume_dock_autohide() {
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
+    if args.iter().any(|a| a == "--check-accessibility") {
+        let trusted = ensure_accessibility(false);
+        let rects = get_macos_dock_icon_rects().len();
+        println!("accessibility: {} (Dock icons read: {})", if trusted { "on" } else { "off" }, rects);
+        return;
+    }
     if args.iter().any(|a| a == "--build-bundles") {
         let cfg = load_or_init_config();
         let mut cache = HashMap::new();
@@ -912,6 +918,7 @@ fn main() {
              --sync-dock          pin your folders to the Dock\n\
              --sync-dock --collapse  pin folders and remove the apps inside them from the Dock\n\
              --build-bundles      rebuild the folder icons in ~/Applications/OpenFolders\n\
+             --check-accessibility  say whether hover has the Accessibility access it needs\n\
              --remove-from-dock   remove the folders from the Dock and put their apps back\n\
              --restore-dock       restore the Dock exactly as it was before OpenFolders"
         );
