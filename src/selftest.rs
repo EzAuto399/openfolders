@@ -123,7 +123,9 @@ pub fn run(socket_path: &str) -> i32 {
     let screen = macos::get_mouse_and_screen();
     let tile = macos::dock_tile_size().map_or(48.0, |s| s + 2.0);
     for f in &cfg.folders {
-        let Some(t) = folder_tile(&rects, &f.name) else { continue };
+        // The Dock re-lays itself out when apps open or quit, so read it right before each check
+        let rects = macos::get_macos_dock_icon_rects();
+        let Some(t) = folder_tile(&rects, &f.name).cloned() else { continue };
         let msg = serde_json::json!({ "folder_id": f.id, "screen_pos": screen });
         let sent = UnixStream::connect(socket_path)
             .and_then(|mut s| s.write_all(msg.to_string().as_bytes()))
@@ -134,18 +136,29 @@ pub fn run(socket_path: &str) -> i32 {
         }
         // The row shows within a frame or two; it closes again once it sees no pointer on it
         let start = Instant::now();
+        // Wait until it has settled: the same frame on two reads in a row
         let mut frame = None;
+        let mut last = None;
         while start.elapsed() < Duration::from_millis(800) {
             std::thread::sleep(Duration::from_millis(30));
-            frame = macos::onscreen_window_frames(pid).into_iter().find(|w| w.2 > 60.0 && w.3 > 30.0);
-            if frame.is_some() {
+            let now = macos::onscreen_window_frames(pid).into_iter().find(|w| w.2 > 60.0 && w.3 > 30.0);
+            if now.is_some() && now == last {
+                frame = now;
                 break;
             }
+            last = now;
         }
         let Some((x, y, w, h)) = frame else {
             r.check(false, &format!("\"{}\" opens", f.name), "no row appeared within 0.8 s");
             continue;
         };
+        // If the Dock moved meanwhile, it wasn't the row's fault: say so instead of failing
+        let after = macos::get_macos_dock_icon_rects();
+        if folder_tile(&after, &f.name).map_or(true, |a| (a.x - t.x).abs() > 1.0) {
+            println!("  - \"{}\": the Dock moved during the check; skipped", f.name);
+            std::thread::sleep(Duration::from_millis(700));
+            continue;
+        }
         let centre = t.x + t.width * 0.5;
         let near_edge = centre - w / 2.0 < screen.screen_x + 14.0
             || centre + w / 2.0 > screen.screen_x + screen.screen_width - 14.0;

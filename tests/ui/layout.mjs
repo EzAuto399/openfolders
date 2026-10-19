@@ -40,6 +40,8 @@ for (const scheme of ["dark", "light"]) {
     ["edit folder, confirm delete", async () => page.click("#deleteFolderBtn")],
     ["new folder", async () => page.evaluate(() => { closeAllModals(); openFolderModal(null); })],
     ["Dock settings", async () => page.evaluate(() => { closeAllModals(); openDockSyncModal(); })],
+    ["folder menu over the app picker", async () => { await page.evaluate(() => { closeAllModals(); openAppPicker(getHoveredOrActiveFolder()); }); await page.waitForTimeout(200); await page.click("#folderMenuBtn"); }],
+    ["app menu over Dock settings", async () => { await page.evaluate(() => { closeAllModals(); openDockSyncModal(); }); await page.waitForTimeout(200); await page.click(".dock-icon-item", { button: "right" }); }],
   ];
 
   for (const [name, act] of states) {
@@ -58,6 +60,15 @@ for (const scheme of ["dark", "light"]) {
           const r = el.getBoundingClientRect();
           if (r.left < -0.5 || r.top < -0.5 || r.right > vw + 0.5 || r.bottom > vh + 0.5)
             out.push(`${label(el)} is cut off by the window (${Math.round(r.left)},${Math.round(r.top)} ${Math.round(r.width)}×${Math.round(r.height)} in ${vw}×${vh})`);
+        }
+        // One panel or menu at a time, and never over the row
+        const open = [...document.querySelectorAll(".modal-card.open, .context-menu.open")].filter(visible);
+        if (open.length > 1) out.push(`${open.map(label).join(" and ")} are open at once`);
+        const rowRect = document.getElementById("secondRowBar").getBoundingClientRect();
+        for (const el of open) {
+          const r = el.getBoundingClientRect();
+          if (r.bottom > rowRect.top + 0.5 && r.top < rowRect.bottom && r.right > rowRect.left && r.left < rowRect.right)
+            out.push(`${label(el)} covers the row`);
         }
         // Nothing may spill out of a panel, except content inside a scrolling area
         for (const panel of document.querySelectorAll(".modal-card.open, .context-menu.open")) {

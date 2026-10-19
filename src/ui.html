@@ -458,7 +458,8 @@
   /* ---------- App picker: Launchpad-style icon grid ---------- */
   #appPickerModal {
     width: 452px;
-    height: 372px;
+    /* Room for about four rows of apps above the fold */
+    height: 452px;
   }
 
   .picker-scroll {
@@ -1116,6 +1117,8 @@ function renderSecondRow(folder) {
 // The window grows upward and stays centred on the Dock icon when a menu opens,
 // so anchor menus to the bottom edge and the horizontal centre.
 function placeMenu(menu, x, y) {
+  // Open above the row, never over it
+  y = Math.min(y, document.getElementById("secondRowBar").getBoundingClientRect().top);
   const finalWidth = Math.max(window.innerWidth, MENU_MIN_WIDTH);
   const half = finalWidth / 2 - 100;
   const dx = Math.max(-half, Math.min(half, x - window.innerWidth / 2));
@@ -1132,6 +1135,8 @@ function openFolderMenu(x, y, folder) {
   html += `<div class="ctx-item" data-act="new"><span>New Folder…</span></div>`;
   html += `<div class="ctx-divider"></div>`;
   html += `<div class="ctx-item" data-act="sync"><span>Dock Settings…</span></div>`;
+  // One thing open at a time, like macOS popovers: a menu replaces an open panel
+  document.querySelectorAll(".modal-card.open").forEach(m => m.classList.remove("open"));
   menu.innerHTML = html;
   menu.classList.add("open");
   placeMenu(menu, x, y);
@@ -1176,6 +1181,8 @@ function openAppContextMenu(x, y, folder, idx, appName, appPath) {
   html += `<div class="ctx-item" data-act="reveal"><span>Show in Finder</span></div>`;
   html += `<div class="ctx-item danger" data-act="remove"><span>Remove from Folder</span></div>`;
 
+  // One thing open at a time, like macOS popovers: a menu replaces an open panel
+  document.querySelectorAll(".modal-card.open").forEach(m => m.classList.remove("open"));
   menu.innerHTML = html;
   menu.classList.add("open");
 
