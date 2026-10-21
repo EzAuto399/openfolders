@@ -33,6 +33,11 @@ pub struct AppConfig {
     /// and apps taken out of every folder are pinned back.
     #[serde(default)]
     pub keep_dock_clean: bool,
+    /// The starter folders have been offered to the Dock at least once. install.sh runs
+    /// --build-bundles (which writes config.json) before the app's first start, so the config
+    /// file's existence can't tell a first run from an upgrade.
+    #[serde(default)]
+    pub first_run_pinning_done: bool,
 }
 
 fn default_true() -> bool {
@@ -190,6 +195,7 @@ fn build_default_config() -> AppConfig {
         active_folder_id: "coding".to_string(),
         hide_on_blur: true,
         keep_dock_clean: false,
+        first_run_pinning_done: false,
     }
 }
 

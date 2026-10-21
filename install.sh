@@ -6,6 +6,7 @@ cd "$(dirname "$0")"
 
 APP="$HOME/Applications/OpenFolders/OpenFolders.app"
 AGENT="$HOME/Library/LaunchAgents/dev.openfolders.plist"
+LOG="$HOME/Library/Logs/openfolders.log"
 
 if [[ "$(uname)" != "Darwin" ]]; then
   echo "OpenFolders only runs on macOS."
@@ -56,7 +57,7 @@ if [[ -n "$IDENTITY" ]]; then
 fi
 
 echo "3/3  Starting OpenFolders and adding it to login items…"
-mkdir -p "$(dirname "$AGENT")"
+mkdir -p "$(dirname "$AGENT")" "$(dirname "$LOG")"
 cat > "$AGENT" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -78,6 +79,11 @@ cat > "$AGENT" <<PLIST
   </dict>
   <key>ProcessType</key>
   <string>Interactive</string>
+  <!-- launchd drops stdout/stderr otherwise; the first-run Dock sync logs here -->
+  <key>StandardOutPath</key>
+  <string>$LOG</string>
+  <key>StandardErrorPath</key>
+  <string>$LOG</string>
 </dict>
 </plist>
 PLIST
