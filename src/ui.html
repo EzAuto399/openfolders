@@ -25,6 +25,11 @@
       --glyph: rgba(255, 255, 255, 0.82);
       --glyph-soft: rgba(255, 255, 255, 0.2);
     }
+    .folder-label {
+      background: rgba(72, 72, 76, 0.86);
+      color: #fff;
+      box-shadow: none;
+    }
   }
 
   * {
@@ -75,7 +80,8 @@
     position: relative;
   }
 
-  /* Folder name beside the row (left), styled like the Dock's own name label */
+  /* Folder name beside the row (left), styled like the Dock's own name label.
+     Follows the system appearance like the Dock's label: light pill on light. */
   .folder-label {
     position: absolute;
     right: calc(100% + 8px);
@@ -83,8 +89,9 @@
     transform: translateY(-50%);
     padding: 4px 11px;
     border-radius: 999px;
-    background: rgba(72, 72, 76, 0.86);
-    color: #fff;
+    background: rgba(255, 255, 255, 0.85);
+    color: #1d1d1f;
+    box-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.12);
     font-size: 13px;
     font-weight: 500;
     white-space: nowrap;
