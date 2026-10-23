@@ -629,12 +629,6 @@ fn handle_http_request(
                 "",
             );
         }
-        ("POST", "/api/open-accessibility-settings") => {
-            let _ = std::process::Command::new("/usr/bin/open")
-                .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
-                .status();
-            send_response(stream, "200 OK", "application/json", b"{}", "");
-        }
         ("GET", "/api/state") => {
             let running = get_running_apps();
             let cfg = {
@@ -1250,10 +1244,9 @@ fn main() {
                 drop(st);
 
                 let js = format!(
-                    "if (window.__openFolderFromDock) window.__openFolderFromDock({}, {}, {});",
+                    "if (window.__openFolderFromDock) window.__openFolderFromDock({}, {});",
                     serde_json::to_string(&target_fid).unwrap_or_else(|_| "\"\"".to_string()),
                     tile_size,
-                    ensure_accessibility(false)
                 );
                 let _ = webview.evaluate_script(&js);
             }

@@ -95,7 +95,7 @@ OpenFolders is running.
 
   • macOS will ask to allow OpenFolders under Accessibility. Allow it: that's how
     it knows which Dock icon you're hovering. Until then, clicking a folder still
-    opens it, and its row shows a "Turn on hover" button.
+    opens it, but not on hover.
   • Your folders are now in the Dock. Hover one to open it.
   • Right-click the row for Add Apps, Edit Folder, New Folder and Dock Settings.
 

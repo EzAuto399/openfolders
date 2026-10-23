@@ -35,7 +35,7 @@ OpenFolders builds from source in about a minute. If you don't have [Rust](https
 
 The installer puts OpenFolders in `~/Applications/OpenFolders`, starts it and adds it to your login items. On first run it pins four starter folders to your Dock. They're filled with common apps you already have (developer tools, AI apps, chat apps, browsers), and you can change them all.
 
-Then **allow OpenFolders under Accessibility** when macOS asks. It needs this to know which Dock icon you're hovering. Until you do, clicking a folder still opens it, and the row shows a **Turn on hover** button that takes you to the right setting.
+Then **allow OpenFolders under Accessibility** when macOS asks. It needs this to know which Dock icon you're hovering. Until you do, clicking a folder still opens it; it just won't open on hover. If you denied it once, add it back under System Settings → Privacy & Security → Accessibility.
 
 To update later, run `git pull && ./install.sh` in the same folder.
 
