@@ -25,6 +25,11 @@
       --glyph: rgba(255, 255, 255, 0.82);
       --glyph-soft: rgba(255, 255, 255, 0.2);
     }
+    .folder-label {
+      background: rgba(72, 72, 76, 0.86);
+      color: #fff;
+      box-shadow: none;
+    }
   }
 
   * {
@@ -75,7 +80,8 @@
     position: relative;
   }
 
-  /* Folder name beside the row (left), styled like the Dock's own name label */
+  /* Folder name beside the row (left), styled like the Dock's own name label.
+     Follows the system appearance like the Dock's label: light pill on light. */
   .folder-label {
     position: absolute;
     right: calc(100% + 8px);
@@ -83,8 +89,9 @@
     transform: translateY(-50%);
     padding: 4px 11px;
     border-radius: 999px;
-    background: rgba(72, 72, 76, 0.86);
-    color: #fff;
+    background: rgba(255, 255, 255, 0.85);
+    color: #1d1d1f;
+    box-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.12);
     font-size: 13px;
     font-weight: 500;
     white-space: nowrap;
@@ -111,30 +118,6 @@
 
   .dock-pill-row::-webkit-scrollbar {
     display: none;
-  }
-
-  /* Shown in the row when Accessibility is off, so hover can't work yet */
-  .row-notice {
-    flex-shrink: 0;
-    margin: 0 4px 0 2px;
-    padding: 0 10px;
-    height: calc(var(--tile) * 0.72);
-    border: none;
-    border-radius: 999px;
-    background: var(--sys-accent, #0a84ff);
-    color: #fff;
-    font: 500 12px/1 -apple-system, BlinkMacSystemFont, sans-serif;
-    white-space: nowrap;
-    cursor: pointer;
-  }
-
-  .row-notice:hover {
-    filter: brightness(1.1);
-  }
-
-  .row-notice:focus-visible {
-    outline: 2px solid var(--glyph);
-    outline-offset: 2px;
   }
 
   /* Vertical separator line just like macOS Dock */
@@ -876,7 +859,6 @@ let state = {
   running: {},
   installedApps: [],
   hoveredFolderId: null,
-  hoverReady: true,
   draggedAppIndex: null,
   editingFolderId: null,
   modalColor: "#6366f1"
@@ -1000,22 +982,10 @@ function renderSecondRow(folder) {
     <div class="dock-divider"></div>
     <div class="dock-plus-item" id="addAppRowBtn" data-label="Add Apps to ${escapeAttr(folder.name)}" role="button" tabindex="0" aria-label="Add apps">+</div>
     <div class="dock-plus-item" id="folderMenuBtn" data-label="${escapeAttr(folder.name)} options" role="button" tabindex="0" aria-label="Folder options">⋯</div>
-    ${state.hoverReady ? "" : `<button class="row-notice" id="hoverSetupBtn" data-label="Needs Accessibility access to open on hover">Turn on hover</button>`}
   `;
 
   if (tooltipFor && bar.contains(tooltipFor)) hideTooltip();
   bar.innerHTML = html;
-
-  const hoverSetup = document.getElementById("hoverSetupBtn");
-  if (hoverSetup) {
-    hoverSetup.onmouseenter = () => showTooltip(hoverSetup, hoverSetup.dataset.label);
-    hoverSetup.onmouseleave = () => hideTooltip();
-    hoverSetup.onclick = () => {
-      hideTooltip();
-      apiPost("/api/open-accessibility-settings", {});
-      apiPost("/api/hide-window", {});
-    };
-  }
 
   bar.onkeydown = (e) => {
     if ((e.key === "Enter" || e.key === " ") && e.target.getAttribute("role") === "button") {
@@ -1621,8 +1591,7 @@ window.__dropHint = function(on) {
   document.getElementById("secondRowBar").classList.toggle("drop-target", on);
 };
 
-window.__openFolderFromDock = function(folderId, tile, hoverReady) {
-  state.hoverReady = hoverReady !== false;
+window.__openFolderFromDock = function(folderId, tile) {
   // `tile` is the Dock tile's width, which is 2 pt wider than the icon drawn in it
   if (tile > 2) document.documentElement.style.setProperty("--tile", `${Math.round(tile - 2)}px`);
   if (folderId && state.config.folders.some(f => f.id === folderId)) {

@@ -6,6 +6,7 @@ cd "$(dirname "$0")"
 
 APP="$HOME/Applications/OpenFolders/OpenFolders.app"
 AGENT="$HOME/Library/LaunchAgents/dev.openfolders.plist"
+LOG="$HOME/Library/Logs/openfolders.log"
 
 if [[ "$(uname)" != "Darwin" ]]; then
   echo "OpenFolders only runs on macOS."
@@ -56,7 +57,7 @@ if [[ -n "$IDENTITY" ]]; then
 fi
 
 echo "3/3  Starting OpenFolders and adding it to login items…"
-mkdir -p "$(dirname "$AGENT")"
+mkdir -p "$(dirname "$AGENT")" "$(dirname "$LOG")"
 cat > "$AGENT" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -78,6 +79,11 @@ cat > "$AGENT" <<PLIST
   </dict>
   <key>ProcessType</key>
   <string>Interactive</string>
+  <!-- launchd drops stdout/stderr otherwise; the first-run Dock sync logs here -->
+  <key>StandardOutPath</key>
+  <string>$LOG</string>
+  <key>StandardErrorPath</key>
+  <string>$LOG</string>
 </dict>
 </plist>
 PLIST
@@ -89,7 +95,7 @@ OpenFolders is running.
 
   • macOS will ask to allow OpenFolders under Accessibility. Allow it: that's how
     it knows which Dock icon you're hovering. Until then, clicking a folder still
-    opens it, and its row shows a "Turn on hover" button.
+    opens it, but not on hover.
   • Your folders are now in the Dock. Hover one to open it.
   • Right-click the row for Add Apps, Edit Folder, New Folder and Dock Settings.
 

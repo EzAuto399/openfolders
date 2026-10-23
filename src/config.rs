@@ -33,6 +33,11 @@ pub struct AppConfig {
     /// and apps taken out of every folder are pinned back.
     #[serde(default)]
     pub keep_dock_clean: bool,
+    /// The starter folders have been offered to the Dock at least once. install.sh runs
+    /// --build-bundles (which writes config.json) before the app's first start, so the config
+    /// file's existence can't tell a first run from an upgrade.
+    #[serde(default)]
+    pub first_run_pinning_done: bool,
 }
 
 fn default_true() -> bool {
@@ -190,6 +195,7 @@ fn build_default_config() -> AppConfig {
         active_folder_id: "coding".to_string(),
         hide_on_blur: true,
         keep_dock_clean: false,
+        first_run_pinning_done: false,
     }
 }
 
@@ -323,7 +329,6 @@ pub fn build_folder_app_bundles(
         let main_png = generate_folder_preview_png(first_folder, mem_cache);
         create_single_app_bundle(
             &main_bundle,
-            "OpenFolders",
             "dev.openfolders.composer",
             None,
             &main_png,
@@ -339,7 +344,6 @@ pub fn build_folder_app_bundles(
         let bundle_id = format!("dev.openfolders.folder.{}", folder.id);
         create_single_app_bundle(
             &bundle_path,
-            &folder.name,
             &bundle_id,
             Some(&folder.id),
             &png_512,
@@ -371,7 +375,6 @@ pub fn build_folder_app_bundles(
 
 fn create_single_app_bundle(
     bundle_path: &Path,
-    display_name: &str,
     bundle_id: &str,
     folder_id: Option<&str>,
     png_512: &[u8],
@@ -427,8 +430,10 @@ fn create_single_app_bundle(
     fs::write(&icns_path, &icns_bytes).map_err(|e| e.to_string())?;
 
     // Write Info.plist with LSUIElement=true so clicking in Dock triggers immediately without bouncing.
-    // Names go into XML, so escape them ("Coding & Dev" otherwise makes the bundle unreadable).
-    let display_name = &xml_escape(display_name);
+    // The Dock reads these two name keys for a tile's hover label: a zero-width space keeps it
+    // blank, like the tile's file-label, so only OpenFolders' own label beside the row shows the
+    // title. The real name stays in the bundle's file name (Finder, Spotlight and TCC use that).
+    let display_name = "\u{200b}";
     let bundle_id = &xml_escape(bundle_id);
     let info_plist = format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>

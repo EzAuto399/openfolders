@@ -4,7 +4,7 @@ mod macos;
 mod selftest;
 
 use config::{
-    build_folder_app_bundles, config_file_path, get_cached_app_icon, load_or_init_config,
+    build_folder_app_bundles, get_cached_app_icon, load_or_init_config,
     pin_app_to_dock, remove_from_dock,
     restore_macos_dock_backup, save_config, scan_installed_apps, sync_macos_dock, AppConfig,
     AppEntry,
@@ -629,12 +629,6 @@ fn handle_http_request(
                 "",
             );
         }
-        ("POST", "/api/open-accessibility-settings") => {
-            let _ = std::process::Command::new("/usr/bin/open")
-                .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
-                .status();
-            send_response(stream, "200 OK", "application/json", b"{}", "");
-        }
         ("GET", "/api/state") => {
             let running = get_running_apps();
             let cfg = {
@@ -1050,8 +1044,10 @@ fn main() {
         }
     }
 
-    let first_run = !config_file_path().exists();
     let mut cfg = load_or_init_config();
+    // install.sh runs --build-bundles before the app's first start, and that already writes
+    // config.json, so "no config file" never sees the real first run: track the pinning itself
+    let first_run = !cfg.first_run_pinning_done;
     if let Some(ref fid) = initial_folder_id {
         if cfg.folders.iter().any(|f| &f.id == fid) {
             cfg.active_folder_id = fid.clone();
@@ -1095,7 +1091,15 @@ fn main() {
         let shared_bg = Arc::clone(&shared);
         std::thread::spawn(move || {
             let cfg = shared_bg.lock().unwrap_or_else(|e| e.into_inner()).config.clone();
-            let _ = sync_macos_dock(&cfg, false, &[], &mut HashMap::new());
+            match sync_macos_dock(&cfg, false, &[], &mut HashMap::new()) {
+                Ok(_) => {
+                    let mut st = shared_bg.lock().unwrap_or_else(|e| e.into_inner());
+                    st.config.first_run_pinning_done = true;
+                    let _ = save_config(&st.config);
+                }
+                // Logged, not swallowed: launchd has nowhere else to show it
+                Err(e) => eprintln!("openfolders: first-run Dock sync failed: {}", e),
+            }
         });
     }
 
@@ -1240,10 +1244,9 @@ fn main() {
                 drop(st);
 
                 let js = format!(
-                    "if (window.__openFolderFromDock) window.__openFolderFromDock({}, {}, {});",
+                    "if (window.__openFolderFromDock) window.__openFolderFromDock({}, {});",
                     serde_json::to_string(&target_fid).unwrap_or_else(|_| "\"\"".to_string()),
                     tile_size,
-                    ensure_accessibility(false)
                 );
                 let _ = webview.evaluate_script(&js);
             }
