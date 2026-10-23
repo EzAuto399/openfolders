@@ -1,0 +1,27 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  dnd:
+    name: drag & drop (${{ matrix.engine }})
+    # macOS: Playwright's WebKit matches the app's WKWebView, no extra system deps needed
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        engine: [webkit, chromium]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: tests/ui/package-lock.json
+      - name: Install test deps
+        working-directory: tests/ui
+        run: npm ci && npx playwright install ${{ matrix.engine }}
+      - name: Run drag and drop test
+        run: node tests/ui/dnd.mjs ${{ matrix.engine }}
