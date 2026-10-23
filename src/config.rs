@@ -542,7 +542,9 @@ with open(plist_path, "rb") as f:
 
 apps = dock.get("persistent-apps", [])
 new_apps = []
-existing_folders = {}
+# The folder tiles the config still wants, by bundle path
+pinned_set = {b.rstrip("/") for b in pinned_bundles}
+kept = set()
 
 def get_app_path(entry):
     try:
@@ -554,15 +556,23 @@ def get_app_path(entry):
 
 for entry in apps:
     p = get_app_path(entry)
-    # Remove old OpenFolders entries so we re-insert cleanly in order
     if "/Applications/OpenFolders/" in p:
-        existing_folders.setdefault(p, entry)
+        key = p.rstrip("/")
+        # Keep every tile where the user put it: drop only tiles of folders that
+        # are gone and duplicates left behind by older versions
+        if key not in pinned_set or key in kept:
+            continue
+        kept.add(key)
+        # Deep copy: the label fix must count as a change against the original
+        entry = copy.deepcopy(entry)
+        entry.setdefault("tile-data", {})["file-label"] = "\u200b"
+        new_apps.append(entry)
         continue
     if unpin_enabled and p in unpin_apps:
         continue
     new_apps.append(entry)
 
-# Apps taken out of every folder go back to the Dock, before the folder tiles
+# Apps taken out of every folder go back to the Dock, ahead of any new folder tile
 present = {get_app_path(e) for e in new_apps}
 for app in data.get("repin_apps", []):
     if app in present or (unpin_enabled and app in unpin_apps) or not os.path.isdir(app):
@@ -577,12 +587,9 @@ for app in data.get("repin_apps", []):
 
 fresh = False
 for bpath in pinned_bundles:
-    # Folder tiles are labelled with a zero-width space: the Dock then draws no visible
-    # name over the folder's row, and keeps it (an empty or missing label it fills back in)
-    old = copy.deepcopy(existing_folders.get(bpath.rstrip("/")))
-    if old is not None:
-        old.setdefault("tile-data", {})["file-label"] = "\u200b"
-        new_apps.append(old)
+    # Already pinned: it kept its own place in the Dock above. Only a folder the
+    # Dock has never seen gets a tile, appended at the end like any new pin.
+    if bpath.rstrip("/") in present:
         continue
     fresh = True
     label = os.path.splitext(os.path.basename(bpath))[0]
