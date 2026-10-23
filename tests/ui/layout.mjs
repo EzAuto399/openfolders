@@ -27,12 +27,10 @@ for (const scheme of ["dark", "light"]) {
   const folderId = await page.evaluate(() => state.config.folders[0]?.id);
 
   const states = [
-    ["row", async () => page.evaluate(id => window.__openFolderFromDock(id, 33, true), folderId)],
-    ["row with hover setup button", async () => page.evaluate(id => window.__openFolderFromDock(id, 33, false), folderId)],
-    ["hover setup tooltip", async () => page.hover("#hoverSetupBtn")],
+    ["row", async () => page.evaluate(id => window.__openFolderFromDock(id, 33), folderId)],
     ["app name tooltip", async () => page.hover(".dock-icon-item")],
-    ["large Dock (64 pt)", async () => page.evaluate(id => window.__openFolderFromDock(id, 66, true), folderId)],
-    ["app menu", async () => { await page.evaluate(id => window.__openFolderFromDock(id, 33, true), folderId); await page.click(".dock-icon-item", { button: "right" }); }],
+    ["large Dock (64 pt)", async () => page.evaluate(id => window.__openFolderFromDock(id, 66), folderId)],
+    ["app menu", async () => { await page.evaluate(id => window.__openFolderFromDock(id, 33), folderId); await page.click(".dock-icon-item", { button: "right" }); }],
     ["folder menu", async () => { await page.keyboard.press("Escape"); await page.click("#folderMenuBtn"); }],
     ["app picker", async () => page.evaluate(() => { closeAllModals(); openAppPicker(getHoveredOrActiveFolder()); })],
     ["app picker, no results", async () => page.fill("#pickerSearch", "zzzzzz")],

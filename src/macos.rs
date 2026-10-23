@@ -206,9 +206,12 @@ pub fn configure_popover_window(ns_window_ptr: *mut c_void) {
         let _: () = msg_send![ns_win, setBackgroundColor: clear];
         // Disable rectangular NSWindow shadow so CSS squircle shadow has zero box artifacts
         let _: () = msg_send![ns_win, setHasShadow: NO];
-        // NSScreenSaverWindowLevel (1000): above the Dock and its name labels, so the row
-        // covers the Dock's own label instead of colliding with it
-        let _: () = msg_send![ns_win, setLevel: 1000i64];
+        // kCGStatusWindowLevel (25): above the Dock (kCGDockWindowLevel = 20) and its name
+        // labels (drawn inside the Dock's own window), so the row covers the Dock's label
+        // instead of colliding with it. Must stay below kCGDraggingWindowLevel (500):
+        // AppKit does not deliver drag-session events to windows at/above the drag
+        // overlay's level, which breaks in-row drag & drop (was NSScreenSaverWindowLevel).
+        let _: () = msg_send![ns_win, setLevel: 25i64];
         // CanJoinAllSpaces (1 << 0) | Transient (1 << 3) | IgnoresCycle (1 << 6) | FullScreenAuxiliary (1 << 8)
         let behavior: u64 = (1 << 0) | (1 << 3) | (1 << 6) | (1 << 8);
         let _: () = msg_send![ns_win, setCollectionBehavior: behavior];
